@@ -155,16 +155,20 @@ class earlyStopping:
 class baseLossTracker:
     def __init__(self, name):
         self.__name = name
-        self.__value = None
+        self.__losses = []
+
+    @property
+    def losses(self):
+        return self.__losses
 
     def clear(self):
-        self.__value = None
+        self.__losses = []
 
     def updateState(self, loss):
-        self.__value = loss
+        self.__losses.append(loss)
 
     def result(self):
-        return self.__value
+        return self.__losses[-1]
 
 
 class lossTrackerCollection:
@@ -174,6 +178,14 @@ class lossTrackerCollection:
     """
     def __init__(self):
         self.__trackers = {}
+
+    @property
+    def trackers(self):
+        return self.__trackers
+
+    @property
+    def metrics(self):
+        return list(self.__trackers.values())
 
     def update(self, losses: dict) -> dict:
         result = {}
@@ -187,10 +199,6 @@ class lossTrackerCollection:
     def clear(self):
         for tracker in self.__trackers.values():
             tracker.clear()
-
-    @property
-    def metrics(self):
-        return list(self.__trackers.values())
 
 
 class reshape(torch.nn.Module):

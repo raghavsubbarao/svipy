@@ -23,8 +23,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         Compute the losses for a single batch of data.
         :param data: a batch as produced by the DataLoader
         :return: dict of named scalar-tensor losses. Must include a
-        'totalLoss' key - the value backpropagated during training and
-        monitored for checkpointing / early stopping.
+                 'totalLoss' key - the value backpropagated during
+                 training and monitored for checkpointing / early stopping.
         """
         pass
 
@@ -46,9 +46,9 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                   scheduler=None,
                   checkpointPath=None, checkPointName=None,
                   validDataLoader=None,
-                  earlyStopping=None):
+                  earlyStopper=None):
 
-        if earlyStopping is not None and validDataLoader is None:
+        if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
 
         trainSize = len(trainDataLoader.dataset)
@@ -94,14 +94,14 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
             if scheduler:
                 scheduler.step()
 
-            if earlyStopping is not None:
-                if earlyStopping.step(validationLoss, t, self):
-                    print(f"Early stopping: no improvement in {earlyStopping.patience} epochs "
-                          f"(best={earlyStopping.best:>7f} @ epoch {earlyStopping.bestEpoch + 1})")
+            if earlyStopper is not None:
+                if earlyStopper.step(validationLoss, t, self):
+                    print(f"Early stopping: no improvement in {earlyStopper.patience} epochs "
+                          f"(best={earlyStopper.best:>7f} @ epoch {earlyStopper.bestEpoch + 1})")
                     break
 
-        if earlyStopping is not None:
-            earlyStopping.restore(self)
+        if earlyStopper is not None:
+            earlyStopper.restore(self)
 
 
 class earlyStopping:

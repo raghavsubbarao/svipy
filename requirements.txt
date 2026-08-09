@@ -2,5 +2,6 @@ torch~=2.5.1
 numpy~=1.26.4
 torchdiffeq~=0.2.5
 torchvision~=0.20.1
+
 matplotlib~=3.5.3
 pandas~=2.2.2

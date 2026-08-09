@@ -3,7 +3,7 @@ from typing import Optional, Iterable, Union, overload, Tuple
 
 import torch
 
-from mlPlayGround.model import baseTorchModel, baseLossTracker
+from svipy.model import baseTorchModel, baseLossTracker
 
 
 class restrictedBoltzmannMachine(baseTorchModel):

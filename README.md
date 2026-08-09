@@ -1,2 +1,2 @@
-# mlPlayGround
- Implementations of various ML models
+# svipy
+ Implementations of various ML models for SVI

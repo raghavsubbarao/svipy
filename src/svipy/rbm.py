@@ -3,7 +3,7 @@ from typing import Optional, Iterable, Union, overload, Tuple
 
 import torch
 
-from svipy.model import baseTorchModel, baseLossTracker
+from svipy.model import baseTorchModel
 
 
 class restrictedBoltzmannMachine(baseTorchModel):
@@ -18,11 +18,6 @@ class restrictedBoltzmannMachine(baseTorchModel):
 
         k = torch.sqrt(6.0 / (torch.sum(torch.Tensor(dims)) + nHid))
         torch.nn.init.uniform_(self.W, -k, k)
-
-        self.reconLossTracker = baseLossTracker(name="reconLoss")
-        self.totalLossTracker = baseLossTracker(name="totalLoss")
-        self.positiveLossTracker = baseLossTracker(name="positiveLoss")
-        self.negativeLossTracker = baseLossTracker(name="negativeLoss")
 
     def pHidden(self, v):
         """
@@ -82,39 +77,17 @@ class restrictedBoltzmannMachine(baseTorchModel):
     def forward(self, inputs):
         return self.pHidden(inputs)
 
-    def trainStep(self, data, optimizer):
+    def computeLoss(self, data) -> dict:
         X = data.to(self.device)
         _, v = self.gibbsSample(X, 1)
 
-        positiveLoss = torch.mean(self.freeEnergy(data))
+        positiveLoss = torch.mean(self.freeEnergy(X))
         negativeLoss = torch.mean(self.freeEnergy(v))
         totalLoss = positiveLoss - negativeLoss
-        reconLoss = torch.mean(torch.sum(torch.flatten((data - v) ** 2, 1), 1))
+        reconLoss = torch.mean(torch.sum(torch.flatten((X - v) ** 2, 1), 1))
 
-        # Backpropagation
-        optimizer.zero_grad()
-        totalLoss.backward()
-        optimizer.step()
-
-        self.reconLossTracker.updateState(reconLoss)
-        self.totalLossTracker.updateState(totalLoss)
-        self.positiveLossTracker.updateState(positiveLoss)
-        self.negativeLossTracker.updateState(negativeLoss)
-
-        return {"reconLoss": self.reconLossTracker.result(),
-                "totalLoss": self.totalLossTracker.result(),
-                "positiveLoss": self.positiveLossTracker.result(),
-                "negativeLoss": self.negativeLossTracker.result()}
-
-    def validStep(self, data):
-        X = data.to(self.device)
-        _, v = self.gibbsSample(X, 1)
-
-        positiveLoss = torch.mean(self.freeEnergy(data))
-        negativeLoss = torch.mean(self.freeEnergy(v))
-        totalLoss = positiveLoss - negativeLoss
-
-        return totalLoss
+        return {"totalLoss": totalLoss, "reconLoss": reconLoss,
+                "positiveLoss": positiveLoss, "negativeLoss": negativeLoss}
 
 
 if __name__ == "__main__":

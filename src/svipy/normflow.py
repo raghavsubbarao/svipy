@@ -466,7 +466,6 @@ class continuousNormFlow(normFlowModule):
         return lpt
 
 
-
 if __name__ == "__main__":
     m = nvpBatchNorm2d(100)
     input = torch.randn(20, 100, 35, 45)

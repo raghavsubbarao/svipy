@@ -6,7 +6,7 @@ import math
 import torch
 from torchdiffeq import odeint_adjoint
 
-from model import baseTorchModel, baseLossTracker
+from svipy.model import baseTorchModel, baseLossTracker
 
 
 #################################

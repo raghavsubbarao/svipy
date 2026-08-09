@@ -7,7 +7,7 @@ from typing import Optional, Iterable, Union, overload, Tuple, List
 import torch
 from torchdiffeq import odeint_adjoint
 
-from model import baseTorchModel, baseLossTracker
+from svipy.model import baseTorchModel, baseLossTracker
 
 
 #################################

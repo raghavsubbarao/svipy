@@ -7,7 +7,7 @@ from typing import Optional, Iterable, Union, overload, Tuple, List
 import torch
 from torchdiffeq import odeint_adjoint
 
-from svipy.model import baseTorchModel, baseLossTracker
+from svipy.model import baseTorchModel
 
 
 #################################
@@ -203,14 +203,6 @@ class realNonVolumePreserving(baseTorchModel):
                                                                 dims, 'check', i % 2 == 0),
                                            nvpBatchNorm2d(dims[0], affine=False)]])
 
-        self.totalLossTracker = baseLossTracker(name="totalLoss")
-        self.logLossTracker = baseLossTracker(name="logLoss")
-        self.priorLossTracker = baseLossTracker(name="priorLoss")
-
-    @property
-    def metrics(self):
-        return [self.totalLossTracker, self.logLossTracker, self.priorLossTracker]
-
     def forward(self, y):
         yr = []
         ll = []
@@ -233,7 +225,7 @@ class realNonVolumePreserving(baseTorchModel):
 
         return torch.flatten(torch.cat(yr, 1), 1), torch.sum(torch.stack(ll, -1), 1)
 
-    def trainStep(self, data, optimizer):
+    def computeLoss(self, data) -> dict:
         X = data.to(self.device)
         y, ll = self.forward(X)
 
@@ -241,27 +233,7 @@ class realNonVolumePreserving(baseTorchModel):
         logLoss = -torch.mean(ll)
         totalLoss = priorLoss + logLoss
 
-        optimizer.zero_grad()
-        totalLoss.backward()
-        optimizer.step()
-
-        self.totalLossTracker.updateState(totalLoss)
-        self.logLossTracker.updateState(logLoss)
-        self.priorLossTracker.updateState(priorLoss)
-
-        return {"totalLoss": self.totalLossTracker.result(),
-                "logLoss": self.logLossTracker.result(),
-                "priorLoss": self.priorLossTracker.result()}
-
-    def validStep(self, data):
-        X = data.to(self.device)
-        y, ll = self.forward(X)
-
-        priorLoss = torch.mean((torch.log(2 * self.pi) + y * y) / 2.)
-        logLoss = -torch.mean(ll)
-        totalLoss = priorLoss + logLoss
-
-        return totalLoss
+        return {"totalLoss": totalLoss, "logLoss": logLoss, "priorLoss": priorLoss}
 
 
 #################################

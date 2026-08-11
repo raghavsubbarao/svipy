@@ -120,16 +120,27 @@ class vaeVectorQuantizer(torch.nn.Module):
         self.register_parameter('embeddings', torch.nn.Parameter(embeddings))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Calculate the input shape of the inputs then
-        # flatten inputs keeping `embedding_dim` intact
-        input_shape = x.shape
-        flattened = torch.flatten(x, 1)
+        """
+        :param x: B x D x ... tensor - the codebook is applied independently
+        at every position along the trailing dims (e.g. each spatial location
+        of a B x D x H x W feature map gets its own nearest codebook entry).
+        :return: tensor of the same shape as x, with each D-vector replaced
+        by its nearest codebook entry.
+        """
+        # move the embedding dim to the end and flatten everything else
+        # (batch + any spatial dims) into one dim, so every position is
+        # quantized independently against the same shared codebook
+        inputShape = x.shape
+        flattened = torch.movedim(x, 1, -1).reshape(-1, self.dEmbedding)
 
         # Quantization.
         codeIndices = self.codeIndices(flattened)
         encodings = torch.nn.functional.one_hot(codeIndices, self.nEmbeddings).type(self.embeddings.dtype)
         quantized = encodings @ torch.transpose(self.embeddings, 0, 1)
-        quantized = torch.reshape(quantized, input_shape)
+
+        # restore the original B x D x ... layout
+        quantized = quantized.reshape(inputShape[0], *inputShape[2:], self.dEmbedding)
+        quantized = torch.movedim(quantized, -1, 1)
 
         return quantized
 

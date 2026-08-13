@@ -36,7 +36,7 @@ class vaeEncoder:
         :param logVar:
         :return:
         """
-        return torch.mean(torch.sum((torch.exp(logVar) + torch.square(mu) - logVar - mu.shape[1]) / 2., dim=1))
+        return torch.mean(torch.mean((torch.exp(logVar) + torch.square(mu) - logVar - mu.shape[1]) / 2., dim=1))
 
 class vaeDecoder:
     def __init__(self, nn: torch.nn.Module) -> None:
@@ -191,8 +191,8 @@ class vqVariationalAutoencoder(baseTorchModel):
         z_q = self.vq(z_e)
 
         # Calculate vector quantization losses
-        codeLoss = torch.mean(torch.sum(torch.flatten(z_q - z_e.detach(), 1) ** 2, dim=-1))  # codebook loss
-        commLoss = torch.mean(torch.sum(torch.flatten(z_q.detach() - z_e, 1) ** 2, dim=-1))  # commitment loss
+        codeLoss = torch.mean(torch.mean(torch.flatten(z_q - z_e.detach(), 1) ** 2, dim=-1))  # codebook loss
+        commLoss = torch.mean(torch.mean(torch.flatten(z_q.detach() - z_e, 1) ** 2, dim=-1))  # commitment loss
 
         # Straight-through estimator
         z_q = z_e + (z_q - z_e).detach()
@@ -201,7 +201,7 @@ class vqVariationalAutoencoder(baseTorchModel):
         recon = self.decode(z_q)
 
         # reconstruction loss
-        reconLoss = torch.mean(torch.sum(torch.flatten(X - recon, 1) ** 2, dim=-1))
+        reconLoss = torch.mean(torch.mean(torch.flatten(X - recon, 1) ** 2, dim=-1))
 
         # total loss
         vqLoss = codeLoss + self.beta * commLoss

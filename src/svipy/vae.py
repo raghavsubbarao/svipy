@@ -36,7 +36,7 @@ class vaeEncoder:
         :param logVar:
         :return:
         """
-        return torch.mean(torch.mean((torch.exp(logVar) + torch.square(mu) - logVar - mu.shape[1]) / 2., dim=1))
+        return torch.mean(torch.mean((torch.exp(logVar) + torch.square(mu) - logVar - 1.) / 2., dim=1))
 
 class vaeDecoder:
     def __init__(self, nn: torch.nn.Module) -> None:
@@ -256,9 +256,9 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
 
         reconLoss = self.decoder.reconstructionLoss(X, recon)
         klLoss = self.encoder.klLoss(zMean, zLogVar)
-        condLoss = torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)
-        condLoss += torch.square(auxzMean - self.rho * zMean)
-        condLoss = torch.mean(torch.sum(condLoss, dim=1)) / (2.0 * (1 - self.rhosqr)) - torch.mean(torch.mean(auxzlogVar, dim=1)) / 2.0
+        condLoss = (torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)) / (1 - self.rhosqr)
+        condLoss += torch.square(auxzMean - self.rho * zMean) / (1 - self.rhosqr)
+        condLoss = torch.mean(torch.mean(condLoss - auxzLogVar, dim=1)) / 2.0
         totalLoss = reconLoss + klLoss + condLoss
 
         return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss, "condLoss": condLoss}

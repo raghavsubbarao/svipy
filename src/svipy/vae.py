@@ -1,6 +1,7 @@
 import abc
 from typing import Optional, Iterable, Union, overload, Tuple
 
+import numpy as np
 import torch
 
 from svipy.model import baseTorchModel
@@ -36,9 +37,9 @@ class vaeEncoder:
         :param logVar:
         :return:
         """
-        return torch.mean(torch.mean((torch.exp(logVar) + torch.square(mu) - logVar - 1.) / 2., dim=1))
+        return torch.mean(torch.mean((torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2., dim=1))
 
-class vaeDecoder:
+class vaeDecoder: 
     def __init__(self, nn: torch.nn.Module) -> None:
         self.__module = nn
 
@@ -248,17 +249,16 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
         X = data.to(self.device)
 
         # auxiliary variables
-        auxX, _, _ = self.forward(X)
-        auxX = auxX.detach()
-        auxzMean, auxzlogVar = self.encode(auxX)
-
         recon, zMean, zLogVar = self.forward(X)
+        auxX = recon.detach()
+        auxzMean, auxzlogVar = self.encode(auxX)
 
         reconLoss = self.decoder.reconstructionLoss(X, recon)
         klLoss = self.encoder.klLoss(zMean, zLogVar)
-        condLoss = (torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)) / (1 - self.rhosqr)
-        condLoss += torch.square(auxzMean - self.rho * zMean) / (1 - self.rhosqr)
-        condLoss = torch.mean(torch.mean(condLoss - auxzlogVar, dim=1)) / 2.0
+        condLoss = torch.square(auxzMean - self.rho * zMean) / (1 - self.rhosqr)
+        condLoss += (torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)) / (1 - self.rhosqr)
+        condLoss += np.log(1 - self.rhosqr)  # constant - should not impact optimization
+        condLoss = torch.mean(torch.mean(condLoss - auxzlogVar - 1., dim=1)) / 2.0
         totalLoss = reconLoss + klLoss + condLoss
 
         return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss, "condLoss": condLoss}

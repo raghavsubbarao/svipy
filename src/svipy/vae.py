@@ -38,7 +38,7 @@ class vaeEncoder:
         """
         return torch.mean(torch.mean((torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2., dim=1))
 
-class vaeDecoder:
+class vaeDecoder: 
     def __init__(self, nn: torch.nn.Module) -> None:
         self.__module = nn
 

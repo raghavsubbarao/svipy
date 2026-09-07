@@ -46,7 +46,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                   scheduler=None,
                   checkpointPath=None, checkPointName=None,
                   validDataLoader=None,
-                  earlyStopper=None):
+                  earlyStopper=None,
+                  annealers=[]):
 
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
@@ -55,6 +56,10 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
 
         for t in range(epochs):
             print(f"Epoch {t + 1}\n-------------------------------")
+
+            for annealer in annealers:
+                current = annealer.step(t, self)
+                print(f"{annealer.param}: {current:>7f}")
 
             # Set the model to training mode - do here
             # in case theres a validation dataset
@@ -94,7 +99,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
             if scheduler:
                 scheduler.step()
 
-            if earlyStopper is not None:
+            stillAnnealing = any(~annealer.isDone(t) for annealer in annealers)
+            if earlyStopper is not None and not stillAnnealing:
                 if earlyStopper.step(validationLoss, t, self):
                     print(f"Early stopping: no improvement in {earlyStopper.patience} epochs "
                           f"(best={earlyStopper.best:>7f} @ epoch {earlyStopper.bestEpoch + 1})")
@@ -150,6 +156,40 @@ class earlyStopping:
     def restore(self, model: torch.nn.Module) -> None:
         if self.restoreBestWeights and self.__bestState is not None:
             model.load_state_dict(self.__bestState)
+
+
+class paramAnnealer:
+    """
+    Linearly ramps a model's `beta` attribute from `startBeta` up to
+    `endBeta` over the first `warmupEpochs` epochs, then holds it at
+    `endBeta`. Used to combat posterior collapse in a VAE: giving the
+    decoder a head start relying on the latent code, before the KL term
+    reaches full strength, so the model isn't immediately rewarded for
+    matching the prior and ignoring the input.
+    """
+    def __init__(self, param: str, start: float, end: float, warmupEpochs: int):
+        assert warmupEpochs > 0
+        self.param = param
+        self.start = start
+        self.end = end
+        self.warmupEpochs = warmupEpochs
+
+    def value(self, epoch: int) -> float:
+        if epoch >= self.warmupEpochs - 1:
+            return self.end
+        return self.start + (self.end - self.start) * (epoch / (self.warmupEpochs - 1))
+
+    def isDone(self, epoch: int) -> bool:
+        return epoch >= self.warmupEpochs - 1
+
+    def step(self, epoch: int, model: torch.nn.Module) -> float:
+        """
+        Call once per epoch. Sets model.beta to the current schedule value
+        and returns it.
+        """
+        current = self.value(epoch)
+        model.__setattr__(self.param, current)
+        return current
 
 
 class baseLossTracker:

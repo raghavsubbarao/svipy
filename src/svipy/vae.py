@@ -38,7 +38,7 @@ class vaeEncoder:
         """
         return torch.mean(torch.mean((torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2., dim=1))
 
-class vaeDecoder: 
+class vaeDecoder:
     def __init__(self, nn: torch.nn.Module) -> None:
         self.__module = nn
 
@@ -84,7 +84,8 @@ class variationalAutoencoder(baseTorchModel):
         self.beta = beta
 
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        mean, logVar = torch.split(self.encoder(x), split_size_or_sections=2, dim=1)
+        zparams = self.encoder(x)
+        mean, logVar = torch.split(zparams, split_size_or_sections=zparams.shape[1] // 2, dim=1)
         return mean, logVar
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
@@ -256,7 +257,7 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
         klLoss = self.encoder.klLoss(zMean, zLogVar)
         condLoss = torch.square(auxzMean - self.rho * zMean) / (1 - self.rhosqr)
         condLoss += (torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)) / (1 - self.rhosqr)
-        condLoss += np.log(1 - self.rhosqr)  # constant - should not impact optimization
+        condLoss += torch.log(1 - self.rhosqr)  # constant - should not impact optimization
         condLoss = torch.mean(torch.mean(condLoss - auxzlogVar - 1., dim=1)) / 2.0
         totalLoss = reconLoss + klLoss + condLoss
 

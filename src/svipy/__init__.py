@@ -1,4 +1,4 @@
-from svipy.model import baseTorchModel, baseLossTracker, lossTrackerCollection, earlyStopping, klAnnealer, reshape
+from svipy.model import baseTorchModel, baseLossTracker, lossTrackerCollection, earlyStopping, paramAnnealer, reshape
 
 from svipy.vae import (
     vaeEncoder,

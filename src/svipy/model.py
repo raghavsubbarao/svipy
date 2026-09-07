@@ -188,6 +188,7 @@ class paramAnnealer:
         Call once per epoch. Sets model.<param> to the current schedule
         value and returns it.
         """
+        assert hasattr(model, self.param)
         current = self.value(epoch)
         setattr(model, self.param, current)
         return current

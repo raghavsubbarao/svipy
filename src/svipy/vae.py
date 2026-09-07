@@ -1,4 +1,5 @@
 import abc
+import math
 from typing import Optional, Iterable, Union, overload, Tuple
 
 import torch
@@ -233,7 +234,9 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
         self.rhosqr = rho * rho
 
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        mean, logVar = torch.split(self.encoder(x), split_size_or_sections=2, dim=1)
+        # mean, logVar = torch.split(self.encoder(x), split_size_or_sections=2, dim=1)
+        zparams = self.encoder(x)
+        mean, logVar = torch.split(zparams, split_size_or_sections=zparams.shape[1] // 2, dim=1)
         return mean, logVar
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
@@ -257,7 +260,7 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
         klLoss = self.encoder.klLoss(zMean, zLogVar)
         condLoss = torch.square(auxzMean - self.rho * zMean) / (1 - self.rhosqr)
         condLoss += (torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)) / (1 - self.rhosqr)
-        condLoss += torch.log(1 - self.rhosqr)  # constant - should not impact optimization
+        condLoss += math.log(1 - self.rhosqr)  # constant - should not impact optimization
         condLoss = torch.mean(torch.mean(condLoss - auxzlogVar - 1., dim=1)) / 2.0
         totalLoss = reconLoss + klLoss + condLoss
 

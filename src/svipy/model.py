@@ -47,11 +47,12 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                   checkpointPath=None, checkPointName=None,
                   validDataLoader=None,
                   earlyStopper=None,
-                  annealers=[]):
+                  annealers=None):
 
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
 
+        annealers = annealers or []
         trainSize = len(trainDataLoader.dataset)
 
         for t in range(epochs):
@@ -99,7 +100,7 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
             if scheduler:
                 scheduler.step()
 
-            stillAnnealing = any(~annealer.isDone(t) for annealer in annealers)
+            stillAnnealing = any(not annealer.isDone(t) for annealer in annealers)
             if earlyStopper is not None and not stillAnnealing:
                 if earlyStopper.step(validationLoss, t, self):
                     print(f"Early stopping: no improvement in {earlyStopper.patience} epochs "
@@ -160,12 +161,10 @@ class earlyStopping:
 
 class paramAnnealer:
     """
-    Linearly ramps a model's `beta` attribute from `startBeta` up to
-    `endBeta` over the first `warmupEpochs` epochs, then holds it at
-    `endBeta`. Used to combat posterior collapse in a VAE: giving the
-    decoder a head start relying on the latent code, before the KL term
-    reaches full strength, so the model isn't immediately rewarded for
-    matching the prior and ignoring the input.
+    Linearly ramps a named attribute of the model from `start` to
+    `end` over the first `warmupEpochs` epochs, then holds it at
+    `end`. Originally used to combat posterior collapse in a VAE:
+    but can be used for any named scalar attribute.
     """
     def __init__(self, param: str, start: float, end: float, warmupEpochs: int):
         assert warmupEpochs > 0
@@ -184,11 +183,12 @@ class paramAnnealer:
 
     def step(self, epoch: int, model: torch.nn.Module) -> float:
         """
-        Call once per epoch. Sets model.beta to the current schedule value
+        Call once per epoch. Sets model.<param> to the current schedule value
         and returns it.
         """
+        assert hasattr(model, self.param)
         current = self.value(epoch)
-        model.__setattr__(self.param, current)
+        setattr(model, self.param, current)
         return current
 
 

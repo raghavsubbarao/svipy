@@ -165,6 +165,17 @@ class vqVariationalAutoencoder(baseTorchModel):
         self.encoder = encoder
         self.decoder = decoder
 
+        # encoder/decoder may be a plain nn.Module (auto-registered as a
+        # submodule by the assignments above) or a vaeEncoder/vaeDecoder-style
+        # wrapper (not an nn.Module itself, so its wrapped module needs to be
+        # registered explicitly or its parameters are invisible to
+        # model.parameters()/.to(device) - silently training with a frozen,
+        # never-moved decoder rather than raising an error on CPU).
+        if not isinstance(encoder, torch.nn.Module):
+            self.register_module('encoder_module', encoder.module)
+        if not isinstance(decoder, torch.nn.Module):
+            self.register_module('decoder_module', decoder.module)
+
         # hidden states
         self.nDims = nDims
         self.nEmbeddings = nEmbeddings

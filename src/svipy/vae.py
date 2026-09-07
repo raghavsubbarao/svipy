@@ -157,13 +157,15 @@ class vaeVectorQuantizer(torch.nn.Module):
 
 
 class vqVariationalAutoencoder(baseTorchModel):
-    def __init__(self, encoder, decoder,
-                 nDims, nEmbeddings,
-                 beta=0.25, data_var=1.0, **kwargs):
+    def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder,
+                 nDims: int, nEmbeddings: int,
+                 beta: float = 0.25, data_var: float = 1.0, **kwargs):
         # initialization
         super(vqVariationalAutoencoder, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
+        self.register_module('encoder_module', self.encoder.module)
+        self.register_module('decoder_module', self.decoder.module)
 
         # hidden states
         self.nDims = nDims
@@ -203,7 +205,7 @@ class vqVariationalAutoencoder(baseTorchModel):
         recon = self.decode(z_q)
 
         # reconstruction loss
-        reconLoss = torch.mean(torch.mean(torch.flatten(X - recon, 1) ** 2, dim=-1))
+        reconLoss = self.decoder.reconstructionLoss(X, recon)  # torch.mean(torch.mean(torch.flatten(X - recon, 1) ** 2, dim=-1))
 
         # total loss
         vqLoss = codeLoss + self.beta * commLoss

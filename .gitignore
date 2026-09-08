@@ -113,16 +113,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# models and data
-/notebooks/.darts/
-/notebooks/.darts/checkpoints
-
 # notebook stuff
 /notebooks/.ipynb_checkpoints
 /.gitignore
-
-# data and models
-checkpoints/
-data/
-models/
-results/

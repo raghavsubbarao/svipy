@@ -220,7 +220,7 @@ class vqVariationalAutoencoder(baseTorchModel):
 #################################
 class autoencodingVariationalAutoencoder(baseTorchModel):
     """
-    Autoencoding Variational Autoencoder implementation.
+    Autoencoding Variational Autoencoder
     https://arxiv.org/abs/2012.03715
     """
     def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, rho: float = 0.99, **kwargs):
@@ -236,7 +236,6 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
         self.rhosqr = rho * rho
 
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # mean, logVar = torch.split(self.encoder(x), split_size_or_sections=2, dim=1)
         zparams = self.encoder(x)
         mean, logVar = torch.split(zparams, split_size_or_sections=zparams.shape[1] // 2, dim=1)
         return mean, logVar
@@ -258,13 +257,16 @@ class autoencodingVariationalAutoencoder(baseTorchModel):
         auxX = recon.detach()
         auxzMean, auxzlogVar = self.encode(auxX)
 
-        reconLoss = self.decoder.reconstructionLoss(X, recon)
-        klLoss = self.encoder.klLoss(zMean, zLogVar)
+        reconLoss = self.decoder.reconstructionLoss(X, recon)  # reconstruction loss
+        klLoss = self.encoder.klLoss(zMean, zLogVar)  # kl loss
+
+        # conditional loss which makes a VAE into an AVAE!
         condLoss = torch.square(auxzMean - self.rho * zMean) / (1 - self.rhosqr)
         condLoss += (torch.exp(auxzlogVar) + self.rhosqr * torch.exp(zLogVar)) / (1 - self.rhosqr)
         condLoss += math.log(1 - self.rhosqr)  # constant - should not impact optimization
         condLoss = torch.mean(torch.mean(condLoss - auxzlogVar - 1., dim=1)) / 2.0
-        totalLoss = reconLoss + klLoss + condLoss
+
+        totalLoss = reconLoss + klLoss + condLoss  # total loss
 
         return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss, "condLoss": condLoss}
 

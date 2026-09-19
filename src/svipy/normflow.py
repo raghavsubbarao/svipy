@@ -242,7 +242,8 @@ class realNonVolumePreserving(baseTorchModel):
 class madeLayer(torch.nn.Linear):
     def __init__(self, inDims: int, outDims: int,
                  bias: bool = True, device=None, dtype=None,
-                 index=None, isFinal=False, minIndex=None, maxIndex=None) -> None:
+                 index=None, isFinal=False, minIndex=None, maxIndex=None,
+                 outDegree: Optional[torch.Tensor] = None) -> None:
         if isFinal:
             super(madeLayer, self).__init__(inDims, 2 * outDims, bias, device, dtype)
         else:
@@ -265,7 +266,8 @@ class madeLayer(torch.nn.Linear):
             self.maxIndex = maxIndex
 
         if isFinal:
-            outIndex = torch.tile(torch.arange(0, outDims), (2, 1)).T.flatten()
+            assert outDegree is not None, "outDegree (per-dimension degree assignment) required for final layer"
+            outIndex = torch.tile(outDegree, (2, 1)).T.flatten()
             mask = (outIndex.unsqueeze(1) > self.index.unsqueeze(0)).float()
         else:
             outIndex = torch.randint(self.minIndex, self.maxIndex + 1, (outDims,))
@@ -289,7 +291,8 @@ class maskedAutoRegressiveFlow(normFlowModule):
         if len(dims) == 1:
             self.madeList.append(madeLayer(dims[0], dims[0], bias=True,
                                            index=self.index, isFinal=True,
-                                           minIndex=0, maxIndex=self.dim - 1))
+                                           minIndex=0, maxIndex=self.dim - 1,
+                                           outDegree=self.index))
         else:
             self.madeList.append(madeLayer(dims[0], dims[1], bias=True,
                                            index=self.index, isFinal=False,
@@ -301,7 +304,8 @@ class maskedAutoRegressiveFlow(normFlowModule):
 
             self.madeList.append(madeLayer(dims[-1], self.dim, bias=True,
                                            index=self.madeList[-1].outIndex, isFinal=True,
-                                           minIndex=0, maxIndex=self.dim - 1))
+                                           minIndex=0, maxIndex=self.dim - 1,
+                                           outDegree=self.index))
 
     def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
         _, lpt = self.forward(y)
@@ -330,7 +334,8 @@ class inverseAutoRegressiveFlow(normFlowModule):
         if len(dims) == 1:
             self.madeList.append(madeLayer(dims[0], dims[0], bias=True,
                                            index=self.index, isFinal=True,
-                                           minIndex=0, maxIndex=self.dim - 1))
+                                           minIndex=0, maxIndex=self.dim - 1,
+                                           outDegree=self.index))
         else:
             self.madeList.append(madeLayer(dims[0], dims[1], bias=True,
                                            index=self.index, isFinal=False,
@@ -342,7 +347,8 @@ class inverseAutoRegressiveFlow(normFlowModule):
 
             self.madeList.append(madeLayer(dims[-1], self.dim, bias=True,
                                            index=self.madeList[-1].outIndex, isFinal=True,
-                                           minIndex=0, maxIndex=self.dim - 1))
+                                           minIndex=0, maxIndex=self.dim - 1,
+                                           outDegree=self.index))
 
     def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
         _, lpt = self.forward(y)

@@ -278,16 +278,18 @@ class madeLayer(torch.nn.Linear):
 
 
 class maskedAutoRegressiveFlow(normFlowModule):
-    def __init__(self, dims: Iterable[int], activation=torch.relu):
+    def __init__(self, dims: Iterable[int], activation: Optional[torch.nn.Module] = None):
         super(maskedAutoRegressiveFlow, self).__init__()
         self.madeList = torch.nn.ModuleList()
 
         self.dim = dims[0]
         self.register_buffer("index", torch.randperm(self.dim))
-        self.activation = activation
+        self.activation = activation if activation is not None else torch.nn.ReLU()
 
         if len(dims) == 1:
-            pass
+            self.madeList.append(madeLayer(dims[0], dims[0], bias=True,
+                                           index=self.index, isFinal=True,
+                                           minIndex=0, maxIndex=self.dim - 1))
         else:
             self.madeList.append(madeLayer(dims[0], dims[1], bias=True,
                                            index=self.index, isFinal=False,
@@ -308,24 +310,27 @@ class maskedAutoRegressiveFlow(normFlowModule):
     def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         z = torch.zeros(y.shape, device=y.device)
         for _ in range(self.dim):
-            for layer in self.madeList:
+            for layer in self.madeList[:-1]:
                 z = self.activation(layer(z))
+            z = self.madeList[-1](z)  # no relu on the final step
             p = z.reshape(z.shape[0], -1, 2)
             z = p[:, :, 0] + torch.exp(p[:, :, 1]) * y
         return z, torch.sum(p[:, :, 1], -1)
 
 
 class inverseAutoRegressiveFlow(normFlowModule):
-    def __init__(self, dims: Iterable[int], activation = torch.relu):
+    def __init__(self, dims: Iterable[int], activation: Optional[torch.nn.Module] = None):
         super(inverseAutoRegressiveFlow, self).__init__()
         self.madeList = torch.nn.ModuleList()
 
         self.dim = dims[0]
         self.register_buffer("index", torch.randperm(self.dim))
-        self.activation = activation
+        self.activation = activation if activation is not None else torch.nn.ReLU()
 
         if len(dims) == 1:
-            pass
+            self.madeList.append(madeLayer(dims[0], dims[0], bias=True,
+                                           index=self.index, isFinal=True,
+                                           minIndex=0, maxIndex=self.dim - 1))
         else:
             self.madeList.append(madeLayer(dims[0], dims[1], bias=True,
                                            index=self.index, isFinal=False,
@@ -345,8 +350,9 @@ class inverseAutoRegressiveFlow(normFlowModule):
 
     def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         p = y
-        for layer in self.madeList:
+        for layer in self.madeList[:-1]:
             p = self.activation(layer(p))
+        p = self.madeList[-1](p)  # no relu on the final step!
         p = p.reshape(p.shape[0], -1, 2)
         return p[:,:,0] + torch.exp(p[:,:,1]) * y, torch.sum(p[:,:,1], -1)
 

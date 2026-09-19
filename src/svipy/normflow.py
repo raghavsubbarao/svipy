@@ -278,12 +278,13 @@ class madeLayer(torch.nn.Linear):
 
 
 class maskedAutoRegressiveFlow(normFlowModule):
-    def __init__(self, dims: Iterable[int]):
+    def __init__(self, dims: Iterable[int], activation=torch.relu):
         super(maskedAutoRegressiveFlow, self).__init__()
         self.madeList = torch.nn.ModuleList()
 
         self.dim = dims[0]
         self.register_buffer("index", torch.randperm(self.dim))
+        self.activation = activation
 
         if len(dims) == 1:
             pass
@@ -308,19 +309,20 @@ class maskedAutoRegressiveFlow(normFlowModule):
         z = torch.zeros(y.shape, device=y.device)
         for _ in range(self.dim):
             for layer in self.madeList:
-                z = layer(z)
+                z = self.activation(layer(z))
             p = z.reshape(z.shape[0], -1, 2)
             z = p[:, :, 0] + torch.exp(p[:, :, 1]) * y
         return z, torch.sum(p[:, :, 1], -1)
 
 
 class inverseAutoRegressiveFlow(normFlowModule):
-    def __init__(self, dims: Iterable[int]):
+    def __init__(self, dims: Iterable[int], activation = torch.relu):
         super(inverseAutoRegressiveFlow, self).__init__()
         self.madeList = torch.nn.ModuleList()
 
         self.dim = dims[0]
         self.register_buffer("index", torch.randperm(self.dim))
+        self.activation = activation
 
         if len(dims) == 1:
             pass
@@ -344,7 +346,7 @@ class inverseAutoRegressiveFlow(normFlowModule):
     def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         p = y
         for layer in self.madeList:
-            p = layer(p)
+            p = self.activation(layer(p))
         p = p.reshape(p.shape[0], -1, 2)
         return p[:,:,0] + torch.exp(p[:,:,1]) * y, torch.sum(p[:,:,1], -1)
 

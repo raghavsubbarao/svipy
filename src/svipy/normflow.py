@@ -70,7 +70,7 @@ class normFlowPriorNormal(normFlowPrior):
         super(normFlowPriorNormal, self).__init__(flow, dim)
 
     def logProb(self, z):
-        _, logDet = self.flow(z)
+        u, logDet = self.flow(z)
         logBase = -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
         return logBase + logDet
 

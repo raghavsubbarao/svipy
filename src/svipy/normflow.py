@@ -458,7 +458,7 @@ class timeConditionedField(torch.nn.Module):
             f = self.forward(z, t)
 
         # (df/dz).ε via autograd — compute gradient of d(f·ε)/dz
-        jvp = torch.autograd.grad(f, z, grad_outputs=eps, create_graph=False)[0]
+        jvp = torch.autograd.grad(f, z, grad_outputs=eps, create_graph=True)[0]
         return (eps * jvp).sum(-1)
 
 

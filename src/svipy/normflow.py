@@ -55,6 +55,25 @@ class normFlowSequential(torch.nn.Sequential, normFlowModule):
             ll.append(fldj)
         return y, torch.sum(torch.stack(ll, -1), 1)
 
+
+class normFlowPrior:
+    def __init__(self, flow: normFlowModule, dim: int):
+        self.flow = flow
+        self.dim = dim
+
+    @abc.abstractmethod
+    def logProb(self, z: torch.Tensor) -> torch.Tensor:
+        pass
+
+class normFlowPriorNormal(normFlowPrior):
+    def __init__(self, flow: normFlowModule, dim: int):
+        super(normFlowPriorNormal, self).__init__(flow, dim)
+
+    def logProb(self, z):
+        _, logDet = self.flow(z)
+        logBase = -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
+        return logBase + logDet
+
 #################################
 #            Real NVP           #
 #################################

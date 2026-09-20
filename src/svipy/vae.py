@@ -39,6 +39,15 @@ class vaeEncoder:
         """
         return torch.mean(torch.mean((torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2., dim=1))
 
+    @staticmethod
+    def logProb(z, mu, logVar):
+        """
+        log q(z|x) at a specific z, diagonal Gaussian. Left unreduced over
+        the batch (shape (B,)) so it can be combined with a prior's
+        log_prob(z) before a single final mean.
+        """
+        return -0.5 * torch.sum((z - mu).pow(2) * torch.exp(-logVar) + logVar + math.log(2 * math.pi), dim=1)
+
 class vaeDecoder:
     def __init__(self, nn: torch.nn.Module) -> None:
         self.__module = nn
@@ -71,13 +80,17 @@ class variationalAutoencoder(baseTorchModel):
     Variational Autoencoder implementation. Defaults to \beta=1
     but can also act as a beta VAE
     """
-    def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, beta: float = 1.0, **kwargs):
+    def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, beta: float = 1.0, prior=None, **kwargs):
         # initialization
         super(variationalAutoencoder, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
         self.register_module('encoder_module', self.encoder.module)
         self.register_module('decoder_module', self.decoder.module)
+
+        self.prior = prior
+        if prior is not None:
+            self.register_module('prior_module', self.prior.flow)
 
         # beta = 1.0 for the original [Kingma,Welling 2013] version but can
         # be adjusted for beta-VAEs.
@@ -94,15 +107,19 @@ class variationalAutoencoder(baseTorchModel):
 
     def forward(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         zMean, zLogVar = self.encode(inputs)  # get the mean and variance
-        recon = self.decoder(self.encoder.sampleLatent(zMean, zLogVar))
-        return recon, zMean, zLogVar
+        z = self.encoder.sampleLatent(zMean, zLogVar)
+        recon = self.decoder(z)
+        return recon, zMean, zLogVar, z
 
     def computeLoss(self, data) -> dict:
         X = data.to(self.device)
-        recon, zMean, zLogVar = self.forward(X)
+        recon, zMean, zLogVar, z = self.forward(X)
 
         reconLoss = self.decoder.reconstructionLoss(X, recon)
-        klLoss = self.encoder.klLoss(zMean, zLogVar)
+        if self.prior is None:
+            klLoss = self.encoder.klLoss(zMean, zLogVar)  # closed form formula
+        else:
+            klLoss = torch.mean(self.encoder.logProb(z, zMean, zLogVar) - self.prior.logProb(z))
         totalLoss = reconLoss + self.beta * klLoss
 
         return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss}

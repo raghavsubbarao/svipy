@@ -479,7 +479,7 @@ class continuousNormFlow(normFlowModule):
         super(continuousNormFlow, self).__init__()
         self.dynamics = dynamics
 
-    def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _integrate(self, y, ts):
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
 
         def augmentedDynamics(t, state):
@@ -489,10 +489,16 @@ class continuousNormFlow(normFlowModule):
             dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
             return dz_dt, dlp_dt
 
-        ts = torch.tensor([0.0, 1.0], device=y.device)
         zt, lpt = odeint_adjoint(augmentedDynamics, (y, log_p), ts, method='dopri5',
                                  adjoint_params=list(self.dynamics.parameters()))
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
+
+    def sample(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self._integrate(y, torch.tensor([0., 1.], device=y.device))
+
+    def forward(self, y):
+        z, lpt = self._integrate(y, torch.tensor([1., 0.], device=y.device))
+        return z, -lpt  # reversed-time trace integral is the forward map's logdet, negate for z→u0
 
     def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
         _, lpt = self.forward(y)

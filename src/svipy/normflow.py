@@ -56,7 +56,7 @@ class normFlowSequential(torch.nn.Sequential, normFlowModule):
         return y, torch.sum(torch.stack(ll, -1), 1)
 
 
-class normFlowPrior:
+class normFlowPrior(abc.ABC):
     def __init__(self, flow: normFlowModule, dim: int):
         self.flow = flow
         self.dim = dim

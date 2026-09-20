@@ -484,12 +484,14 @@ class continuousNormFlow(normFlowModule):
 
         def augmentedDynamics(t, state):
             z, lp = state
-            z = z.requires_grad_(True)
-            dz_dt = self.dynamics(z, t)
-            dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
+            with torch.enable_grad():
+                z = z.detach().requires_grad_(True)
+                dz_dt = self.dynamics(z, t)
+                dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
             return dz_dt, dlp_dt
 
-        zt, lpt = odeint_adjoint(augmentedDynamics, (y, log_p), ts, method='dopri5',
+        zt, lpt = odeint_adjoint(augmentedDynamics, (y, log_p), ts,
+                                 method='rk4', options={'step_size': 0.05},
                                  adjoint_params=list(self.dynamics.parameters()))
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 

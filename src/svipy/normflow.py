@@ -62,17 +62,57 @@ class normFlowPrior(abc.ABC):
         self.dim = dim
 
     @abc.abstractmethod
-    def logProb(self, z: torch.Tensor) -> torch.Tensor:
+    def baseProb(self, z: torch.Tensor) -> torch.Tensor:
         pass
+
+    def logProb(self, z: torch.Tensor) -> torch.Tensor:
+        u, logDet = self.flow(z)
+        logBase = self.baseProb(u)
+        return logBase + logDet
+
+class normFlowPriorUniform(normFlowPrior):
+    def __init__(self, flow: normFlowModule, dim: int):
+        super(normFlowPriorUniform, self).__init__(flow, dim)
+
+    def baseProb(self, u):
+        return 0
 
 class normFlowPriorNormal(normFlowPrior):
     def __init__(self, flow: normFlowModule, dim: int):
         super(normFlowPriorNormal, self).__init__(flow, dim)
 
-    def logProb(self, z):
+    def baseProb(self, u):
+        return -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
+
+
+class normFlowPosterior(abc.ABC):
+    def __init__(self, flow: normFlowModule, dim: int):
+        self.flow = flow
+        self.dim = dim
+
+    @abc.abstractmethod
+    def baseProb(self, z: torch.Tensor) -> torch.Tensor:
+        pass
+
+    def logProb(self, z: torch.Tensor) -> torch.Tensor:
         u, logDet = self.flow(z)
-        logBase = -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
-        return logBase + logDet
+        logBase = self.baseProb(u)
+        return logBase - logDet
+
+class normFlowPosteriorUniform(normFlowPosterior):
+    def __init__(self, flow: normFlowModule, dim: int):
+        super(normFlowPosteriorUniform, self).__init__(flow, dim)
+
+    def baseProb(self, u):
+        return 0.
+
+class normFlowPosteriorNormal(normFlowPosterior):
+    def __init__(self, flow: normFlowModule, dim: int):
+        super(normFlowPosteriorNormal, self).__init__(flow, dim)
+
+    def baseProb(self, u):
+        return -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
+
 
 #################################
 #            Real NVP           #

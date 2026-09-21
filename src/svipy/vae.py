@@ -5,6 +5,7 @@ from typing import Optional, Iterable, Union, overload, Tuple
 import torch
 
 from svipy.model import baseTorchModel
+from svipy.normflow import normFlowPrior, normFlowPosterior
 
 class vaeEncoder:
     def __init__(self, nn: torch.nn.Module) -> None:
@@ -80,7 +81,8 @@ class variationalAutoencoder(baseTorchModel):
     Variational Autoencoder implementation. Defaults to \beta=1
     but can also act as a beta VAE
     """
-    def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, beta: float = 1.0, prior=None, **kwargs):
+    def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, beta: float = 1.0,
+                 prior: normFlowPrior = None, posterior: normFlowPosterior =None, **kwargs):
         # initialization
         super(variationalAutoencoder, self).__init__(**kwargs)
         self.encoder = encoder
@@ -91,6 +93,10 @@ class variationalAutoencoder(baseTorchModel):
         self.prior = prior
         if prior is not None:
             self.register_module('prior_module', self.prior.flow)
+
+        self.posterior = posterior
+        if posterior is not None:
+            self.register_module('posterior_module', self.posterior.flow)
 
         # beta = 1.0 for the original [Kingma,Welling 2013] version but can
         # be adjusted for beta-VAEs.
@@ -116,10 +122,15 @@ class variationalAutoencoder(baseTorchModel):
         recon, zMean, zLogVar, z = self.forward(X)
 
         reconLoss = self.decoder.reconstructionLoss(X, recon)
-        if self.prior is None:
+        if self.prior is None and self.posterior is None:
             klLoss = self.encoder.klLoss(zMean, zLogVar)  # closed form formula
         else:
-            klLoss = torch.mean(self.encoder.logProb(z, zMean, zLogVar) - self.prior.logProb(z))
+            klLoss = self.encoder.logProb(z, zMean, zLogVar)
+            if self.prior is not None:
+                klLoss = klLoss - self.prior.logProb(z)
+            if self.posterior is not None:
+                klLoss = klLoss - self.posterior.logProb(z)
+            klLoss = torch.mean(klLoss)
         totalLoss = reconLoss + self.beta * klLoss
 
         return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss}

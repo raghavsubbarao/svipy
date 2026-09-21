@@ -113,23 +113,28 @@ class variationalAutoencoder(baseTorchModel):
 
     def forward(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         zMean, zLogVar = self.encode(inputs)  # get the mean and variance
-        z = self.encoder.sampleLatent(zMean, zLogVar)
-        recon = self.decoder(z)
-        return recon, zMean, zLogVar, z
+        z0 = self.encoder.sampleLatent(zMean, zLogVar)
+
+        if self.posterior:
+            zk, fldj = self.posterior_module(z0)
+        else:
+            zk = z0
+            fldj = torch.zeros((z0.shape[0],))
+
+        recon = self.decoder(zk)
+        return recon, zMean, zLogVar, z0, zk, fldj
 
     def computeLoss(self, data) -> dict:
         X = data.to(self.device)
-        recon, zMean, zLogVar, z = self.forward(X)
+        recon, zMean, zLogVar, z0, zk, fldj = self.forward(X)
 
         reconLoss = self.decoder.reconstructionLoss(X, recon)
         if self.prior is None and self.posterior is None:
             klLoss = self.encoder.klLoss(zMean, zLogVar)  # closed form formula
         else:
-            klLoss = self.encoder.logProb(z, zMean, zLogVar)
+            klLoss = self.encoder.logProb(z0, zMean, zLogVar) - fldj
             if self.prior is not None:
                 klLoss = klLoss - self.prior.logProb(z)
-            if self.posterior is not None:
-                klLoss = klLoss - self.posterior.logProb(z)
             klLoss = torch.mean(klLoss)
         totalLoss = reconLoss + self.beta * klLoss
 

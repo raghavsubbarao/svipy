@@ -134,7 +134,7 @@ class variationalAutoencoder(baseTorchModel):
         else:
             klLoss = self.encoder.logProb(z0, zMean, zLogVar) - fldj
             if self.prior is not None:
-                klLoss = klLoss + self.prior.logProb(zk)
+                klLoss = klLoss - self.prior.logLikelihood(zk)
             klLoss = torch.mean(klLoss)
         totalLoss = reconLoss + self.beta * klLoss
 

@@ -62,26 +62,26 @@ class normFlowPrior(abc.ABC):
         self.dim = dim
 
     @abc.abstractmethod
-    def baseProb(self, z: torch.Tensor) -> torch.Tensor:
+    def baseLikelihood(self, z: torch.Tensor) -> torch.Tensor:
         pass
 
-    def logProb(self, z: torch.Tensor) -> torch.Tensor:
+    def logLikelihood(self, z: torch.Tensor) -> torch.Tensor:
         u, logDet = self.flow(z)
-        logBase = self.baseProb(u)
+        logBase = self.baseLikelihood(u)
         return logBase + logDet
 
 class normFlowPriorUniform(normFlowPrior):
     def __init__(self, flow: normFlowModule, dim: int):
         super(normFlowPriorUniform, self).__init__(flow, dim)
 
-    def baseProb(self, u):
+    def baseLikelihood(self, u):
         return 0
 
 class normFlowPriorNormal(normFlowPrior):
     def __init__(self, flow: normFlowModule, dim: int):
         super(normFlowPriorNormal, self).__init__(flow, dim)
 
-    def baseProb(self, u):
+    def baseLikelihood(self, u):
         return -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
 
 

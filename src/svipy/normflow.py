@@ -84,6 +84,7 @@ class normFlowPriorNormal(normFlowPrior):
     def baseProb(self, u):
         return -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
 
+
 class normFlowPosterior:
     def __init__(self, flow: normFlowModule, dim: int):
         self.flow = flow
@@ -345,19 +346,30 @@ class maskedAutoRegressiveFlow(normFlowModule):
                                            minIndex=0, maxIndex=self.dim - 1,
                                            outDegree=self.index))
 
+    def generate(self, eps: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x = torch.zeros(eps.shape, device=eps.device)
+        for _ in range(self.dim):
+            for layer in self.madeList[:-1]:
+                x = self.activation(layer(x))
+            x = self.madeList[-1](x)  # no relu on the final step
+            p = x.reshape(x.shape[0], -1, 2)
+            x = p[:, :, 0] + torch.exp(p[:, :, 1]) * eps
+        return x, torch.sum(p[:, :, 1], -1)
+
+    def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        p = x
+        for layer in self.madeList[:-1]:
+            p = self.activation(layer(p))
+        p = self.madeList[-1](p)  # no relu on the final step!
+        p = p.reshape(p.shape[0], -1, 2)
+        return (x - p[:,:,0]) / torch.exp(p[:,:,1]), -torch.sum(p[:, :, 1], -1)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.normalize(x)
+
     def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
         _, lpt = self.forward(y)
         return lpt
-
-    def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        z = torch.zeros(y.shape, device=y.device)
-        for _ in range(self.dim):
-            for layer in self.madeList[:-1]:
-                z = self.activation(layer(z))
-            z = self.madeList[-1](z)  # no relu on the final step
-            p = z.reshape(z.shape[0], -1, 2)
-            z = p[:, :, 0] + torch.exp(p[:, :, 1]) * y
-        return z, torch.sum(p[:, :, 1], -1)
 
 
 class inverseAutoRegressiveFlow(normFlowModule):
@@ -388,17 +400,30 @@ class inverseAutoRegressiveFlow(normFlowModule):
                                            minIndex=0, maxIndex=self.dim - 1,
                                            outDegree=self.index))
 
-    def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
-        _, lpt = self.forward(y)
-        return lpt
-
-    def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        p = y
+    def generate(self, eps: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        p = eps
         for layer in self.madeList[:-1]:
             p = self.activation(layer(p))
         p = self.madeList[-1](p)  # no relu on the final step!
         p = p.reshape(p.shape[0], -1, 2)
-        return p[:,:,0] + torch.exp(p[:,:,1]) * y, torch.sum(p[:,:,1], -1)
+        return p[:,:,0] + torch.exp(p[:,:,1]) * eps, torch.sum(p[:, :, 1], -1)
+
+    def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        eps = torch.zeros(x.shape, device=x.device)
+        for _ in range(self.dim):
+            for layer in self.madeList[:-1]:
+                eps = self.activation(layer(eps))
+            eps = self.madeList[-1](eps)  # no relu on the final step
+            p = eps.reshape(eps.shape[0], -1, 2)
+            eps = (x - p[:, :, 0]) / torch.exp(p[:, :, 1])
+        return eps, -torch.sum(p[:, :, 1], -1)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.generate(x)
+
+    def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
+        _, lpt = self.forward(y)
+        return lpt
 
 
 #################################

@@ -119,7 +119,7 @@ class variationalAutoencoder(baseTorchModel):
             zk, fldj = self.posterior_module(z0)
         else:
             zk = z0
-            fldj = torch.zeros((z0.shape[0],))
+            fldj = torch.zeros((z0.shape[0],), device=self.device)
 
         recon = self.decoder(zk)
         return recon, zMean, zLogVar, z0, zk, fldj
@@ -134,7 +134,7 @@ class variationalAutoencoder(baseTorchModel):
         else:
             klLoss = self.encoder.logProb(z0, zMean, zLogVar) - fldj
             if self.prior is not None:
-                klLoss = klLoss - self.prior.logProb(z)
+                klLoss = klLoss + self.prior.logProb(zk)
             klLoss = torch.mean(klLoss)
         totalLoss = reconLoss + self.beta * klLoss
 

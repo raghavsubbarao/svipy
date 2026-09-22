@@ -82,7 +82,7 @@ class normFlowPriorNormal(normFlowPrior):
         super(normFlowPriorNormal, self).__init__(flow, dim)
 
     def baseLikelihood(self, u):
-        return -0.5 * (u.pow(2).sum(dim=1) + self.dim * math.log(2 * math.pi))
+        return -0.5 * (u.pow(2).flatten(start_dim=1).sum(dim=1) + self.dim * math.log(2 * math.pi))
 
 
 class normFlowPosterior:
@@ -352,17 +352,17 @@ class maskedAutoRegressiveFlow(normFlowModule):
             for layer in self.madeList[:-1]:
                 x = self.activation(layer(x))
             x = self.madeList[-1](x)  # no relu on the final step
-            p = x.reshape(x.shape[0], -1, 2)
-            x = p[:, :, 0] + torch.exp(p[:, :, 1]) * eps
-        return x, torch.sum(p[:, :, 1], -1)
+            p = x.reshape(*x.shape[:-1], -1, 2)
+            x = p[..., 0] + torch.exp(p[..., 1]) * eps
+        return x, torch.sum(p[..., 1], -1)
 
     def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         p = x
         for layer in self.madeList[:-1]:
             p = self.activation(layer(p))
         p = self.madeList[-1](p)  # no relu on the final step!
-        p = p.reshape(p.shape[0], -1, 2)
-        return (x - p[:,:,0]) / torch.exp(p[:,:,1]), -torch.sum(p[:, :, 1], -1)
+        p = p.reshape(*p.shape[:-1], -1, 2)
+        return (x - p[..., 0]) / torch.exp(p[..., 1]), -torch.sum(p[..., 1], -1)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.normalize(x)
@@ -405,8 +405,8 @@ class inverseAutoRegressiveFlow(normFlowModule):
         for layer in self.madeList[:-1]:
             p = self.activation(layer(p))
         p = self.madeList[-1](p)  # no relu on the final step!
-        p = p.reshape(p.shape[0], -1, 2)
-        return p[:,:,0] + torch.exp(p[:,:,1]) * eps, torch.sum(p[:, :, 1], -1)
+        p = p.reshape(*p.shape[:-1], -1, 2)
+        return p[..., 0] + torch.exp(p[..., 1]) * eps, torch.sum(p[..., 1], -1)
 
     def normalize(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         eps = torch.zeros(x.shape, device=x.device)
@@ -414,9 +414,9 @@ class inverseAutoRegressiveFlow(normFlowModule):
             for layer in self.madeList[:-1]:
                 eps = self.activation(layer(eps))
             eps = self.madeList[-1](eps)  # no relu on the final step
-            p = eps.reshape(eps.shape[0], -1, 2)
-            eps = (x - p[:, :, 0]) / torch.exp(p[:, :, 1])
-        return eps, -torch.sum(p[:, :, 1], -1)
+            p = eps.reshape(*eps.shape[:-1], -1, 2)
+            eps = (x - p[..., 0]) / torch.exp(p[..., 1])
+        return eps, -torch.sum(p[..., 1], -1)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.generate(x)

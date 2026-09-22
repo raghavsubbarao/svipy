@@ -38,16 +38,27 @@ class vaeEncoder:
         :param logVar:
         :return:
         """
-        return torch.mean(torch.mean((torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2., dim=1))
+        prob = (torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2.
+        return torch.mean(torch.sum(prob.flatten(start_dim=1), dim=1))
 
     @staticmethod
     def logLikelihood(z, mu, logVar):
         """
         log q(z|x) at a specific z, diagonal Gaussian. Left unreduced over
-        the batch (shape (B,)) so it can be combined with a prior's
-        log_prob(z) before a single final mean.
+        the batch (shape (B,)) so it can be combined with a vae.posterior's
+        log-likelihood before a single final mean.
         """
-        return -0.5 * torch.sum((z - mu).pow(2) * torch.exp(-logVar) + logVar + math.log(2 * math.pi), dim=1)
+        prob = torch.square(z - mu) * torch.exp(-logVar) + logVar + math.log(2 * math.pi)
+        return -0.5 * torch.sum(prob.flatten(start_dim=1), dim=1)
+
+    @staticmethod
+    def priorLogLikelihood(z):
+        """
+        likelihood of a standard normal distribution. Used to update the
+        ELBO when there is no prior but there is a vae.posterior
+        """
+        prob = torch.square(z) + math.log(2 * math.pi)
+        return -0.5 * torch.sum(prob.flatten(start_dim=1), dim=1)
 
 class vaeDecoder:
     def __init__(self, nn: torch.nn.Module) -> None:
@@ -134,7 +145,9 @@ class variationalAutoencoder(baseTorchModel):
         else:
             klLoss = self.encoder.logLikelihood(z0, zMean, zLogVar) - fldj
             if self.prior is not None:
-                klLoss = klLoss - self.prior.logLikelihood(zk)
+                klLoss = klLoss - self.prior.logLikelihood(zk)  # if prior exists
+            else:
+                klLoss = klLoss - self.encoder.priorLogLikelihood(zk)
             klLoss = torch.mean(klLoss)
         totalLoss = reconLoss + self.beta * klLoss
 

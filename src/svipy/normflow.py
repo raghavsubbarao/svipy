@@ -90,7 +90,7 @@ class normFlowPosterior:
         self.flow = flow
         self.dim = dim
 
-    def logProb(self, u: torch.Tensor) -> torch.Tensor:
+    def logDetJacobian(self, u: torch.Tensor) -> torch.Tensor:
         _, logDet = self.flow(u)
         return -logDet
 

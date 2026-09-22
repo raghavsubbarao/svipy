@@ -41,7 +41,7 @@ class vaeEncoder:
         return torch.mean(torch.mean((torch.square(mu) + torch.exp(logVar) - logVar - 1.) / 2., dim=1))
 
     @staticmethod
-    def logProb(z, mu, logVar):
+    def logLikelihood(z, mu, logVar):
         """
         log q(z|x) at a specific z, diagonal Gaussian. Left unreduced over
         the batch (shape (B,)) so it can be combined with a prior's
@@ -132,7 +132,7 @@ class variationalAutoencoder(baseTorchModel):
         if self.prior is None and self.posterior is None:
             klLoss = self.encoder.klLoss(zMean, zLogVar)  # closed form formula
         else:
-            klLoss = self.encoder.logProb(z0, zMean, zLogVar) - fldj
+            klLoss = self.encoder.logLikelihood(z0, zMean, zLogVar) - fldj
             if self.prior is not None:
                 klLoss = klLoss - self.prior.logLikelihood(zk)
             klLoss = torch.mean(klLoss)

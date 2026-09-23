@@ -551,12 +551,15 @@ class continuousNormFlow(normFlowModule):
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))
 
+    def normalize(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        z, lpt = self._integrate(y, torch.tensor([1., 0.], device=y.device))
+        return z, -lpt  # reversed-time trace integral is the forward map's logdet, negate for z→u0
+
     def forward(self, y):
         if self.direction == 'normalize':
-            z, lpt = self._integrate(y, torch.tensor([1., 0.], device=y.device))
-            return z, -lpt  # reversed-time trace integral is the forward map's logdet, negate for z→u0
+            return self.normalize(y)
         else:
-            return self._integrate(y, torch.tensor([0., 1.], device=y.device))
+            return self.generate(y)
 
     def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
         _, lpt = self.forward(y)

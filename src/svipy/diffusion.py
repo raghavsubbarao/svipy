@@ -17,7 +17,7 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         super(conditionalPath, self).__init__()
 
     @abc.abstractmethod
-    def sample(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
@@ -27,7 +27,7 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         pass
 
     @abc.abstractmethod
-    def target(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
@@ -38,10 +38,11 @@ class conditionalPath(torch.nn.Module, abc.ABC):
 
 
 class linearConditionalPath(conditionalPath):
-    def __init__(self):
+    def __init__(self, minSigma=1e-4):
         super(linearConditionalPath, self).__init__()
+        self.minSigma = minSigma
 
-    def sample(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
@@ -50,7 +51,7 @@ class linearConditionalPath(conditionalPath):
         """
         return (1 - t) * x0 + t * x1
 
-    def target(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
@@ -78,7 +79,7 @@ class varPreservingConditionalPath(conditionalPath):
     def dsigma(self, t):
         return -self.alpha(t) * self.dalpha(t) / self.sigma(t)
 
-    def sample(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
@@ -87,7 +88,7 @@ class varPreservingConditionalPath(conditionalPath):
         """
         return self.alpha(t) * x1 + self.sigma(t) * x0
 
-    def target(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:

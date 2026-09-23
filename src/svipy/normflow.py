@@ -457,6 +457,12 @@ class filmTimeEmbedding(torch.nn.Module):
         return gammas, betas  # gamma, beta: (numLayers, hiddenDim)
 
 
+def gaussianProbe(z: torch.Tensor) -> torch.Tensor:
+    return torch.randn_like(z)
+
+def rademacherProbe(z: torch.Tensor) -> torch.Tensor:
+    return torch.randint(0, 2, z.shape, device=z.device, dtype=z.dtype) * 2 - 1
+
 class timeConditionedField(torch.nn.Module):
     """
     A timeConditionedField is a network that takes two inputs - a tensor
@@ -468,7 +474,7 @@ class timeConditionedField(torch.nn.Module):
     the network that generates the regression target for flow matching and
     score matching.
     """
-    def __init__(self, dims, timeEmbedding=None, _allowFilm=False):
+    def __init__(self, dims, timeEmbedding=None, probeSampler=None, _allowFilm=False):
         if timeEmbedding is not None and isinstance(timeEmbedding, filmTimeEmbedding) and not _allowFilm:
             # timeConditionedField cannot handle FiLM time embeddings. However, the timeConditionedFieldFilm
             # initializer also passes through here so in that case _allowFilm=True, but if not throw an error
@@ -478,6 +484,8 @@ class timeConditionedField(torch.nn.Module):
 
         self.timeEmbedding = timeEmbedding
         t_dim = timeEmbedding.dim if timeEmbedding else 1
+
+        self.probeSampler = probeSampler if probeSampler is not None else gaussianProbe
 
         self.layers = torch.nn.ModuleList()
         self.layers.append(torch.nn.Linear(dims[0] + t_dim, dims[1], bias=True))
@@ -495,9 +503,8 @@ class timeConditionedField(torch.nn.Module):
         return self.layers[-1](h)
 
     def hutchinsonTrace(self, z: torch.Tensor, t: torch.Tensor, f: torch.Tensor = None):
-        # todo: implement rademacher sampling (as opposed to normal)
         # todo: sample multiple esp to reduce variance?
-        eps = torch.randn_like(z)
+        eps = self.probeSampler(z)  # torch.randn_like(z)
         if f is None:
             f = self.forward(z, t)
 
@@ -519,9 +526,11 @@ class timeConditionedFieldFilm(timeConditionedField):
 
 
 class continuousNormFlow(normFlowModule):
-    def __init__(self, dynamics: timeConditionedField):
+    def __init__(self, dynamics: timeConditionedField, direction='generate'):
         super(continuousNormFlow, self).__init__()
         self.dynamics = dynamics
+        assert direction in ('normalize', 'generate')
+        self.direction = direction
 
     def _integrate(self, y, ts):
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
@@ -539,12 +548,15 @@ class continuousNormFlow(normFlowModule):
                                  adjoint_params=list(self.dynamics.parameters()))
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
-    def sample(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))
 
     def forward(self, y):
-        z, lpt = self._integrate(y, torch.tensor([1., 0.], device=y.device))
-        return z, -lpt  # reversed-time trace integral is the forward map's logdet, negate for z→u0
+        if self.direction == 'normalize':
+            z, lpt = self._integrate(y, torch.tensor([1., 0.], device=y.device))
+            return z, -lpt  # reversed-time trace integral is the forward map's logdet, negate for z→u0
+        else:
+            return self._integrate(y, torch.tensor([0., 1.], device=y.device))
 
     def forwardLogDetJacobian(self, y: torch.Tensor, **kwargs) -> torch.Tensor:
         _, lpt = self.forward(y)

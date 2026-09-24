@@ -20,8 +20,10 @@ from svipy.normflow import (
     inverseAutoRegressiveFlow,
     fourierTimeEmbedding,
     filmTimeEmbedding,
+    timeConditionedNetwork,
+    mlpTimeConditionedNetwork,
+    filmMlpTimeConditionedNetwork,
     timeConditionedField,
-    timeConditionedFieldFilm,
     continuousNormFlow,
 )
 

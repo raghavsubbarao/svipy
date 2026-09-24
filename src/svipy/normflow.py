@@ -496,9 +496,15 @@ class timeConditionedField(torch.nn.Module):
         self.activation = torch.nn.ELU()
 
     def forward(self, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        t_embed = self.timeEmbedding(t) if self.timeEmbedding else t.reshape(1)
-        t_expand = t_embed.unsqueeze(0).expand(z.shape[0], -1)
-        h = torch.cat([z, t_expand], dim=-1)
+        t_embed = self.timeEmbedding(t) if self.timeEmbedding else t.reshape(-1, 1)
+        if t_embed.shape[0] == 1:
+            # For CFM and diffusion, t will now be of dimension B x ...
+            # However, for CNFs, t is constant across the batch and will have
+            # shape 1 x 1. This needs to be broadcast across the batch so expand
+            # if necessary!
+            t_embed = t_embed.expand(z.shape[0], -1)
+
+        h = torch.cat([z, t_embed], dim=-1)
         for layer in self.layers[:-1]:
             h = self.activation(layer(h))
         return self.layers[-1](h)

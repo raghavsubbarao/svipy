@@ -112,7 +112,8 @@ class varPreservingConditionalPath(conditionalPath):
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        return self.alpha(t) * x1 + self.sigma(t) * x0, self.dalpha(t) * x1 + self.dsigma(t) * x0
+        tx = self._expand(t, x0)
+        return self.alpha(tx) * x1 + self.sigma(tx) * x0, self.dalpha(tx) * x1 + self.dsigma(tx) * x0
 
 
 class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):

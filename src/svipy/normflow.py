@@ -429,6 +429,7 @@ class inverseAutoRegressiveFlow(normFlowModule):
 #################################
 #              CNF              #
 #################################
+# time embedding layers
 class fourierTimeEmbedding(torch.nn.Module):
     def __init__(self, dim: int):
         super().__init__()
@@ -459,7 +460,7 @@ class filmTimeEmbedding(torch.nn.Module):
         betas = [c[d:] for c, d in zip(chunks, self.dims)]
         return gammas, betas  # gamma, beta: (numLayers, hiddenDim)
 
-
+# take input and time to produce flow/velocity fields
 class timeConditionedNetwork(torch.nn.Module, abc.ABC):
     """
     Consumes a state tensor z (B x ...) together with an already-computed,
@@ -496,6 +497,29 @@ class mlpTimeConditionedNetwork(timeConditionedNetwork):
             h = self.activation(layer(h))
         return self.layers[-1](h)
 
+class filmMlpTimeConditionedNetwork(timeConditionedNetwork):
+    """
+    Applies the time embedding as a per-layer FiLM (scale/shift) modulation
+    instead of concatenating it. Must be paired with a filmTimeEmbedding —
+    t_embed is the (gammas, betas) pair it produces, one (gamma, beta) per
+    hidden layer.
+    """
+    def __init__(self, dims: List[int], activation: Optional[torch.nn.Module] = None):
+        super(filmMlpTimeConditionedNetwork, self).__init__()
+        self.layers = torch.nn.ModuleList()
+        self.layers.append(torch.nn.Linear(dims[0], dims[1], bias=True))
+        for inDims, outDims in zip(dims[1:-1], dims[2:]):
+            self.layers.append(torch.nn.Linear(inDims, outDims, bias=True))
+        self.layers.append(torch.nn.Linear(dims[-1], dims[0], bias=True))
+        self.activation = activation if activation is not None else torch.nn.ELU()
+
+    def forward(self, z: torch.Tensor, t_embed: Tuple[List[torch.Tensor], List[torch.Tensor]]) -> torch.Tensor:
+        gamma, beta = t_embed
+        h = z
+        for i, layer in enumerate(self.layers[:-1]):
+            h = self.activation(gamma[i] * layer(h) + beta[i])
+        return self.layers[-1](h)
+
 class cnnTimeConditionedNetwork(timeConditionedNetwork):
     """
     Concatenates the time embedding onto z as extra features and runs the
@@ -507,48 +531,27 @@ class cnnTimeConditionedNetwork(timeConditionedNetwork):
     def __init__(self, inDims: int, configs: List[Tuple[int]], t_dim: int = 1,
                  activation: Optional[torch.nn.Module] = None):
         super(cnnTimeConditionedNetwork, self).__init__()
-        self.layers = torch.nn.ModuleList()
-        assert configs[-1][0] == inDims  # the output has to be of the same shape as the input
 
         inChannels = inDims + t_dim
-        for outChannels, kernelSize, stride, padding in configs:
-            self.layers.append(torch.nn.Conv2d(inChannels, outChannels,
-                                               kernelSize, stride, padding, bias=True))
+        self.layers = torch.nn.ModuleList()
+        for outChannels, kernelSize in configs:
+            self.layers.append(torch.nn.Conv2d(inChannels, outChannels, kernelSize,
+                                               stride=1, padding='same', bias=True))
             inChannels = outChannels
+
+        # ensure output of smae shape as input
+        self.layers.append(torch.nn.Conv2d(inChannels, inDims, kernelSize=1, bias=True))
 
         self.activation = activation if activation is not None else torch.nn.ELU()
 
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor) -> torch.Tensor:
-        h = torch.cat([z, t_embed], dim=-1)
+        t_embed = t_embed.view(*t_embed.shape, 1, 1).expand(-1, -1, *z.shape[2:])  # broadcast to (B, t_dim, H, W)
+        h = torch.cat([z, t_embed], dim=1)  # concatenate along channel axis
         for layer in self.layers[:-1]:
             h = self.activation(layer(h))
         return self.layers[-1](h)
 
-
-class filmMlpTimeConditionedNetwork(timeConditionedNetwork):
-    """
-    Applies the time embedding as a per-layer FiLM (scale/shift) modulation
-    instead of concatenating it. Must be paired with a filmTimeEmbedding —
-    t_embed is the (gammas, betas) pair it produces, one (gamma, beta) per
-    hidden layer.
-    """
-    def __init__(self, dims: List[int]):
-        super(filmMlpTimeConditionedNetwork, self).__init__()
-        self.layers = torch.nn.ModuleList()
-        self.layers.append(torch.nn.Linear(dims[0], dims[1], bias=True))
-        for inDims, outDims in zip(dims[1:-1], dims[2:]):
-            self.layers.append(torch.nn.Linear(inDims, outDims, bias=True))
-        self.layers.append(torch.nn.Linear(dims[-1], dims[0], bias=True))
-        self.activation = torch.nn.ELU()
-
-    def forward(self, z: torch.Tensor, t_embed: Tuple[List[torch.Tensor], List[torch.Tensor]]) -> torch.Tensor:
-        gamma, beta = t_embed
-        h = z
-        for i, layer in enumerate(self.layers[:-1]):
-            h = self.activation(gamma[i] * layer(h) + beta[i])
-        return self.layers[-1](h)
-
-
+# probes for hutchinson estimator
 def gaussianProbe(z: torch.Tensor) -> torch.Tensor:
     return torch.randn_like(z)
 

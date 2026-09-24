@@ -66,7 +66,7 @@ class conditionalFlowMatcher(baseTorchModel):
     def __init__(self, pathGenerator: conditionalPath, velocityField: timeConditionedField):
         super(conditionalFlowMatcher, self).__init__()
         self.pathGenerator = pathGenerator
-        self.velocityField = timeConditionedField
+        self.velocityField = velocityField
 
     def computeLoss(self, data) -> dict:
         X1 = data.to(self.device)

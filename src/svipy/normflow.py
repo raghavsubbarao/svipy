@@ -463,6 +463,7 @@ def gaussianProbe(z: torch.Tensor) -> torch.Tensor:
 def rademacherProbe(z: torch.Tensor) -> torch.Tensor:
     return torch.randint(0, 2, z.shape, device=z.device, dtype=z.dtype) * 2 - 1
 
+
 class timeConditionedField(torch.nn.Module):
     """
     A timeConditionedField is a network that takes two inputs - a tensor
@@ -511,7 +512,6 @@ class timeConditionedField(torch.nn.Module):
         # (df/dz).ε via autograd — compute gradient of d(f·ε)/dz
         jvp = torch.autograd.grad(f, z, grad_outputs=eps, create_graph=True)[0]
         return (eps * jvp).sum(-1)
-
 
 class timeConditionedFieldFilm(timeConditionedField):
     def __init__(self, dims: List[int], film: filmTimeEmbedding):

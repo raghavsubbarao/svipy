@@ -7,6 +7,7 @@ import torch
 from torchdiffeq import odeint_adjoint
 
 from svipy.model import baseTorchModel, baseLossTracker
+from svipy.normflow import timeConditionedField
 
 
 #################################
@@ -17,6 +18,10 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         super(conditionalPath, self).__init__()
 
     @abc.abstractmethod
+    def forward(self, x0, x1, t) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return (x_t, u_t): interpolated point and its target velocity."""
+        pass
+
     def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
@@ -24,9 +29,8 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        pass
+        return self.forward(x0, x1, t)[0]
 
-    @abc.abstractmethod
     def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
@@ -34,7 +38,12 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         :param t:`
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        pass
+        return self.forward(x0, x1, t)[1]
+
+    @staticmethod
+    def _expand(t, x):
+        assert t.shape[0] == x.shape[0]
+        return t.view(t.shape[0], *([1] * (x.dim() - 1))) if t.dim() == 1 else t
 
 
 class linearConditionalPath(conditionalPath):
@@ -42,24 +51,41 @@ class linearConditionalPath(conditionalPath):
         super(linearConditionalPath, self).__init__()
         self.minSigma = minSigma
 
-    def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        return (1 - t) * x0 + t * x1
+        tx = self._expand(t, x0)
+        return (1 - tx) * x0 + tx * x1, x1 - (1 - self.minSigma) * x0
 
-    def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        :param x0: B x ... tensor where B=batch_size
-        :param x1:
-        :param t:`
-        :return: tensor of size (B,) of inverse log determinant of the Jacobians
-        """
-        return x1 - x0
 
+class conditionalFlowMatcher(baseTorchModel):
+    def __init__(self, pathGenerator: conditionalPath, velocityField: timeConditionedField):
+        super(conditionalFlowMatcher, self).__init__()
+        self.pathGenerator = pathGenerator
+        self.velocityField = timeConditionedField
+
+    def computeLoss(self, data) -> dict:
+        X1 = data.to(self.device)
+        X0 = torch.randn_like(X0, device=self.device)
+        t = torch.rand(x1.shape[0], device=self.device)
+
+        Xt = self.pathGenerator.generate(X0, X1, t)
+        Ut = self.pathGenerator.velocity(X0, X1, t)
+
+        Vt = self.velocityField(Xt, t)
+
+        totalLoss = torch.mean(torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1))
+
+        return {"totalLoss": totalLoss}
+
+
+#################################
+#           Diffusion           #
+#################################
 
 class varPreservingConditionalPath(conditionalPath):
     def __init__(self):
@@ -79,23 +105,14 @@ class varPreservingConditionalPath(conditionalPath):
     def dsigma(self, t):
         return -self.alpha(t) * self.dalpha(t) / self.sigma(t)
 
-    def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        return self.alpha(t) * x1 + self.sigma(t) * x0
-
-    def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        :param x0: B x ... tensor where B=batch_size
-        :param x1:
-        :param t:`
-        :return: tensor of size (B,) of inverse log determinant of the Jacobians
-        """
-        return self.dalpha(t) * x1 + self.dsigma(t) * x0
+        return self.alpha(t) * x1 + self.sigma(t) * x0, self.dalpha(t) * x1 + self.dsigma(t) * x0
 
 
 class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):
@@ -148,3 +165,4 @@ class varPreservingConditionalPathLinear(varPreservingConditionalPath):
 
     def dalpha(self, t):
         return - self.beta(t) * self.alpha(t) / 2.0
+

@@ -481,20 +481,49 @@ class mlpTimeConditionedNetwork(timeConditionedNetwork):
     owning timeConditionedField (1 if none is used).
     """
 
-    def __init__(self, dims: List[int], t_dim: int = 1):
+    def __init__(self, dims: List[int], t_dim: int = 1, activation: Optional[torch.nn.Module] = None):
         super(mlpTimeConditionedNetwork, self).__init__()
         self.layers = torch.nn.ModuleList()
         self.layers.append(torch.nn.Linear(dims[0] + t_dim, dims[1], bias=True))
         for inDims, outDims in zip(dims[1:-1], dims[2:]):
             self.layers.append(torch.nn.Linear(inDims, outDims, bias=True))
         self.layers.append(torch.nn.Linear(dims[-1], dims[0], bias=True))
-        self.activation = torch.nn.ELU()
+        self.activation = activation if activation is not None else torch.nn.ELU()
 
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor) -> torch.Tensor:
         h = torch.cat([z, t_embed], dim=-1)
         for layer in self.layers[:-1]:
             h = self.activation(layer(h))
         return self.layers[-1](h)
+
+class cnnTimeConditionedNetwork(timeConditionedNetwork):
+    """
+    Concatenates the time embedding onto z as extra features and runs the
+    result through a plain MLP. Assumes z is a flat B x D tensor. t_dim must
+    match the dimension of whatever time embedding this is paired with in the
+    owning timeConditionedField (1 if none is used).
+    """
+
+    def __init__(self, inDims: int, configs: List[Tuple[int]], t_dim: int = 1,
+                 activation: Optional[torch.nn.Module] = None):
+        super(cnnTimeConditionedNetwork, self).__init__()
+        self.layers = torch.nn.ModuleList()
+        assert configs[-1][0] == inDims  # the output has to be of the same shape as the input
+
+        inChannels = inDims + t_dim
+        for outChannels, kernelSize, stride, padding in configs:
+            self.layers.append(torch.nn.Conv2d(inChannels, outChannels,
+                                               kernelSize, stride, padding, bias=True))
+            inChannels = outChannels
+
+        self.activation = activation if activation is not None else torch.nn.ELU()
+
+    def forward(self, z: torch.Tensor, t_embed: torch.Tensor) -> torch.Tensor:
+        h = torch.cat([z, t_embed], dim=-1)
+        for layer in self.layers[:-1]:
+            h = self.activation(layer(h))
+        return self.layers[-1](h)
+
 
 class filmMlpTimeConditionedNetwork(timeConditionedNetwork):
     """

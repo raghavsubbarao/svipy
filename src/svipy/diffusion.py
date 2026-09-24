@@ -73,9 +73,7 @@ class conditionalFlowMatcher(baseTorchModel):
         X0 = torch.randn_like(X1, device=self.device)
         t = torch.rand(X1.shape[0], device=self.device)
 
-        Xt = self.pathGenerator.generate(X0, X1, t)
-        Ut = self.pathGenerator.velocity(X0, X1, t)
-
+        Xt, Ut = self.pathGenerator(X0, X1, t)
         Vt = self.velocityField(Xt, t)
 
         totalLoss = torch.mean(torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1))

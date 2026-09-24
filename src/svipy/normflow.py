@@ -562,8 +562,7 @@ class timeConditionedField(torch.nn.Module):
         return self.network(z, t_embed)
 
     def hutchinsonTrace(self, z: torch.Tensor, t: torch.Tensor, f: torch.Tensor = None):
-        # todo: sample multiple esp to reduce variance?
-        eps = self.probeSampler(z)  # torch.randn_like(z)
+        eps = self.probeSampler(z)
         if f is None:
             f = self.forward(z, t)
 

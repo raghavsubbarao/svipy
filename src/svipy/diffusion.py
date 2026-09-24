@@ -42,7 +42,7 @@ class conditionalPath(torch.nn.Module, abc.ABC):
 
     @staticmethod
     def _expand(t, x):
-        assert t.shape[0] == x.shape[0]
+        assert t.dim() == 1 and t.shape[0] == x.shape[0]
         return t.view(t.shape[0], *([1] * (x.dim() - 1))) if t.dim() == 1 else t
 
 

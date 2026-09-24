@@ -1,6 +1,6 @@
 import abc
 import math
-# from typing import Optional, Iterable, Union, overload, Tuple, List
+from typing import Tuple  # Optional, Iterable, Union, overload, Tuple, List
 # import numpy as np
 
 import torch
@@ -59,7 +59,7 @@ class linearConditionalPath(conditionalPath):
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
         tx = self._expand(t, x0)
-        return (1 - tx) * x0 + tx * x1, x1 - (1 - self.minSigma) * x0
+        return tx * x1 + (1 - (1 - self.minSigma) * tx) * x0, x1 - (1 - self.minSigma) * x0
 
 
 class conditionalFlowMatcher(baseTorchModel):
@@ -70,8 +70,8 @@ class conditionalFlowMatcher(baseTorchModel):
 
     def computeLoss(self, data) -> dict:
         X1 = data.to(self.device)
-        X0 = torch.randn_like(X0, device=self.device)
-        t = torch.rand(x1.shape[0], device=self.device)
+        X0 = torch.randn_like(X1, device=self.device)
+        t = torch.rand(X1.shape[0], device=self.device)
 
         Xt = self.pathGenerator.generate(X0, X1, t)
         Ut = self.pathGenerator.velocity(X0, X1, t)

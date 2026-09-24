@@ -165,3 +165,6 @@ class varPreservingConditionalPathLinear(varPreservingConditionalPath):
     def dalpha(self, t):
         return - self.beta(t) * self.alpha(t) / 2.0
 
+
+if __name__ == "__main__":
+    pass

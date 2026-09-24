@@ -460,7 +460,7 @@ class filmTimeEmbedding(torch.nn.Module):
         return gammas, betas  # gamma, beta: (numLayers, hiddenDim)
 
 
-class timeConditionedNetwork(torch.nn.Module):
+class timeConditionedNetwork(torch.nn.Module, abc.ABC):
     """
     Consumes a state tensor z (B x ...) together with an already-computed,
     batch-aligned time embedding t_embed and produces an output of the same

@@ -430,7 +430,26 @@ class inverseAutoRegressiveFlow(normFlowModule):
 #              CNF              #
 #################################
 # time embedding layers
-class fourierTimeEmbedding(torch.nn.Module):
+class timeEmbedding(torch.nn.Module, abc.ABC):
+    @abc.abstractmethod
+    def combine(self, i: int, x: torch.Tensor, layer: torch.nn.Module, t_embed) -> torch.Tensor:
+        pass
+
+class identityTimeEmbedding(timeEmbedding):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        return t.reshape(-1, 1)   # (B, dim)
+
+    def combine(self, i: int, x: torch.Tensor, layer: torch.nn.Module, t_embed) -> torch.Tensor:
+        if i == 0:
+            dim = 1 if x.dim() > 2 else -1  # channel axis for spatial h, feature axis for flat h
+            return layer(torch.cat([x, t_embed], dim=dim))
+        else:
+            return layer(x)
+
+class fourierTimeEmbedding(timeEmbedding):
     def __init__(self, dim: int):
         super().__init__()
         assert dim % 2 == 0
@@ -443,7 +462,14 @@ class fourierTimeEmbedding(torch.nn.Module):
         angles = t * self.frequencies  # (B, dim//2,)
         return torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)   # (B, dim)
 
-class filmTimeEmbedding(torch.nn.Module):
+    def combine(self, i: int, x: torch.Tensor, layer: torch.nn.Module, t_embed) -> torch.Tensor:
+        if i == 0:
+            dim = 1 if x.dim() > 2 else -1  # channel axis for spatial h, feature axis for flat h
+            return layer(torch.cat([x, t_embed], dim=dim))
+        else:
+            return layer(x)
+
+class filmTimeEmbedding(timeEmbedding):
     def __init__(self, dims: List[int]):
         super().__init__()
 
@@ -454,45 +480,19 @@ class filmTimeEmbedding(torch.nn.Module):
         self.dim = 0  # signals to cnfDynamicsFilm: don't add to input dim
 
     def forward(self, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        params = self.net(t.reshape(1)).squeeze(0)  # (2 * sum(dims),)
+        params = self.net(t.reshape(-1, 1)).squeeze(0)  # (2 * sum(dims),)
         chunks = params.split([2 * d for d in self.dims])
         gammas = [c[:d] for c, d in zip(chunks, self.dims)]
         betas = [c[d:] for c, d in zip(chunks, self.dims)]
         return gammas, betas  # gamma, beta: (numLayers, hiddenDim)
 
-class timeConditioningStrategy(abc.ABC):
-    @abc.abstractmethod
-    def timeDims(self, t_dim: int) -> int:
-        """
-        number of time dimensions needed at first layer
-        """
-
-    @abc.abstractmethod
-    def combine(self, i: int, x: torch.Tensor, layer: torch.nn.Module, t_embed) -> torch.Tensor:
-        """
-        run layer i on x, combined with t_embed
-        """
-
-class concatConditioning(timeConditioningStrategy):
-    def timeDims(self, t_dim: int) -> int:
-        return t_dim
-
-    def combine(self, i: int, x: torch.Tensor, layer: torch.nn.Module, t_embed) -> torch.Tensor:
-        dim = 1 if h.dim() > 2 else -1  # channel axis for spatial h, feature axis for flat h
-        # t_embed = _broadcastToMatch(t_embed, h)  # reuses the (B,k)->(B,k,H,W) expand from the CNN fix
-        return layer(torch.cat([h, t_embed], dim=dim))
-
-class filmConditioning(timeConditioningStrategy):
-    def timeDims(self, t_dim):
-        return 0
-
-    def combine(self, i, h, layer, t_embed):
-        gamma, beta = t_embed
-        return gamma[i] * layer(h) + beta[i]
+    def combine(self, i, x, layer, t_embed):
+        gamma, beta = t_embed[i]
+        return gamma * layer(x) + beta
 
 
 # take input and time to produce flow/velocity fields
-class timeConditionedNetwork(torch.nn.Module, abc.ABC):
+class scalarConditionedNetwork(torch.nn.Module, abc.ABC):
     """
     Consumes a state tensor z (B x ...) together with an already-computed,
     batch-aligned time embedding t_embed and produces an output of the same
@@ -502,21 +502,24 @@ class timeConditionedNetwork(torch.nn.Module, abc.ABC):
     """
 
     @abc.abstractmethod
-    def forward(self, z: torch.Tensor, t_embed) -> torch.Tensor:
+    def filmDims(self) -> int:
         pass
 
-class mlpTimeConditionedNetwork(timeConditionedNetwork):
+    @abc.abstractmethod
+    def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
+        pass
+
+class scalarConditionedNetworkMLP(scalarConditionedNetwork):
     """
     Concatenates the time embedding onto z as extra features and runs the
     result through a plain MLP. Assumes z is a flat B x D tensor. t_dim must
     match the dimension of whatever time embedding this is paired with in the
     owning timeConditionedField (1 if none is used).
     """
-
     def __init__(self, dims: List[int], t_dim: int = 1,
                  conditioning: timeConditioningStrategy = None,
                  activation: Optional[torch.nn.Module] = None):
-        super(mlpTimeConditionedNetwork, self).__init__()
+        super(scalarConditionedNetworkMLP, self).__init__()
 
         self.conditioning = conditioning or concatConditioning()
         self.activation = activation if activation is not None else torch.nn.ELU()
@@ -528,13 +531,18 @@ class mlpTimeConditionedNetwork(timeConditionedNetwork):
             self.layers.append(torch.nn.Linear(inDims, outDims, bias=True))
         self.layers.append(torch.nn.Linear(dims[-1], dims[0], bias=True))
 
-    def forward(self, z: torch.Tensor, t_embed: torch.Tensor) -> torch.Tensor:
-        h = torch.cat([z, t_embed], dim=-1)
+        self.__filmDims = sum(dims[1:])
+
+    def filmDims(self) -> int:
+        return self.__filmDims
+
+    def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
+        h = z
         for i, layer in enumerate(self.layers[:-1]):
-            h = self.activation(self.conditioning.combine(i, h, layer, t_embed))
+            h = self.activation(embedding.combine(i, h, layer, t_embed))
         return self.layers[-1](h)
 
-class cnnTimeConditionedNetwork(timeConditionedNetwork):
+class scalarConditionedNetworkCNN(scalarConditionedNetwork):
     """
     Concatenates the time embedding onto z as extra features and runs the
     result through a plain MLP. Assumes z is a flat B x D tensor. t_dim must
@@ -545,12 +553,12 @@ class cnnTimeConditionedNetwork(timeConditionedNetwork):
     def __init__(self, inDims: int, configs: List[Tuple[int]], t_dim: int = 1,
                  conditioning: timeConditioningStrategy = None,
                  activation: Optional[torch.nn.Module] = None):
-        super(cnnTimeConditionedNetwork, self).__init__()
+        super(scalarConditionedNetworkCNN, self).__init__()
 
         self.conditioning = conditioning or concatConditioning()
         self.activation = activation if activation is not None else torch.nn.ELU()
 
-        inChannels = inDims+ self.conditioning.timeDims(t_dim)
+        inChannels = inDims + self.conditioning.timeDims(t_dim)
         self.layers = torch.nn.ModuleList()
         for outChannels, kernelSize in configs:
             self.layers.append(torch.nn.Conv2d(inChannels, outChannels, kernelSize,
@@ -560,11 +568,16 @@ class cnnTimeConditionedNetwork(timeConditionedNetwork):
         # ensure output of same shape as input
         self.layers.append(torch.nn.Conv2d(inChannels, inDims, kernelSize=1, bias=True))
 
-    def forward(self, z: torch.Tensor, t_embed: torch.Tensor) -> torch.Tensor:
+        self.__filmDims = sum([c for c, _, _ in configs])
+
+    def filmDims(self) -> int:
+        return self.__filmDims
+
+    def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
         t_embed = t_embed.view(*t_embed.shape, 1, 1).expand(-1, -1, *z.shape[2:])  # broadcast to (B, t_dim, H, W)
-        h = torch.cat([z, t_embed], dim=1)  # concatenate along channel axis
+        h = z
         for layer in self.layers[:-1]:
-            h = self.activation(self.conditioning.combine(i, h, layer, t_embed))
+            h = self.activation(embedding.combine(i, h, layer, t_embed))
         return self.layers[-1](h)
 
 # probes for hutchinson estimator
@@ -592,14 +605,14 @@ class timeConditionedField(torch.nn.Module):
     the network that generates the regression target for flow matching and
     score matching.
     """
-    def __init__(self, network: timeConditionedNetwork, timeEmbedding=None, probeSampler=None):
+    def __init__(self, network: scalarConditionedNetwork, embedding=None, probeSampler=None):
         super(timeConditionedField, self).__init__()
         self.network = network
-        self.timeEmbedding = timeEmbedding
+        self.timeEmbedding = embedding if embedding else identityTimeEmbedding()
         self.probeSampler = probeSampler if probeSampler is not None else gaussianProbe
 
     def forward(self, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        t_embed = self.timeEmbedding(t) if self.timeEmbedding else t.reshape(-1, 1)
+        t_embed = self.timeEmbedding(t)
         if isinstance(t_embed, torch.Tensor) and t_embed.shape[0] == 1:
             # For CFM and diffusion, t will now be of dimension B x 1
             # However, for CNFs, t is constant across the batch and
@@ -609,7 +622,7 @@ class timeConditionedField(torch.nn.Module):
             # z without this step.)
             t_embed = t_embed.expand(z.shape[0], -1)
 
-        return self.network(z, t_embed)
+        return self.network(z, t_embed, self.timeEmbedding)
 
     def hutchinsonTrace(self, z: torch.Tensor, t: torch.Tensor, f: torch.Tensor = None):
         eps = self.probeSampler(z)

@@ -470,8 +470,8 @@ class fourierTimeEmbedding(timeEmbedding):
         self.register_buffer('frequencies', frequencies)
 
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        t = t.reshape(-1, 1)                                                # (B, 1) or (1, 1) for a scalar/shared t
-        angles = t * self.frequencies                                      # (B, dim//2)
+        t = t.reshape(-1, 1)  # (B, 1) or (1, 1) for a scalar/shared t
+        angles = t * self.frequencies  # (B, dim//2,)
         return torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)   # (B, dim)
 
     def combine(self, i: int, x: torch.Tensor, layer: torch.nn.Module, t_embed) -> torch.Tensor:
@@ -483,13 +483,13 @@ class fourierTimeEmbedding(timeEmbedding):
             return layer(x)
 
 class filmTimeEmbedding(timeEmbedding):
-    def __init__(self, layerWidths: List[int]):
-        # layerWidths: the output width of every FiLM-able layer, in order -
+    def __init__(self, dims: List[int]):
+        # dims: the output width of every FiLM-able layer, in order -
         # i.e. exactly network.filmDims() for whichever network this pairs
         # with (scalarConditionedNetworkMLP/CNN). One (gamma, beta) pair gets
         # produced per entry, sized to that entry's width.
         super().__init__()
-        self.dims = layerWidths
+        self.dims = dims
         self.net = torch.nn.Linear(1, 2 * sum(self.dims))
         self.dim = 0  # signals to cnfDynamicsFilm: don't add to input dim
 
@@ -507,7 +507,7 @@ class filmTimeEmbedding(timeEmbedding):
         beta = self._expandToMatch(beta, out)
         return gamma * out + beta
 
-
+# probes for hutchinson estimator
 def gaussianProbe(z: torch.Tensor) -> torch.Tensor:
     return torch.randn_like(z)
 
@@ -527,8 +527,10 @@ class scalarConditionedNetwork(torch.nn.Module, abc.ABC):
     """
     @abc.abstractmethod
     def filmDims(self) -> List[int]:
-        """Output width of every FiLM-able layer, in order - what a paired
-        filmTimeEmbedding needs to produce one (gamma, beta) pair per entry."""
+        """
+        Output width of every FiLM-able layer, in order - what a paired
+        filmTimeEmbedding needs to produce one (gamma, beta) pair per entry.
+        """
         pass
 
     @abc.abstractmethod
@@ -559,10 +561,8 @@ class scalarConditionedNetworkMLP(scalarConditionedNetwork):
         self.__filmDims = dims[1:]
 
     def filmDims(self) -> List[int]:
-        assert self.__t_dim == 0, (
-            f"filmDims() is only meaningful for a network built with t_dim=0 "
-            f"(FiLM never concatenates); this one was built with t_dim={self.__t_dim}"
-        )
+        assert self.__t_dim == 0, (f"filmDims() is only meaningful for a network built with t_dim=0 "
+                                   f"(FiLM never concatenates); this one was built with t_dim={self.__t_dim}")
         return self.__filmDims
 
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
@@ -600,10 +600,8 @@ class scalarConditionedNetworkCNN(scalarConditionedNetwork):
         self.__filmDims = [outChannels for outChannels, _ in configs]
 
     def filmDims(self) -> List[int]:
-        assert self.__t_dim == 0, (
-            f"filmDims() is only meaningful for a network built with t_dim=0 "
-            f"(FiLM never concatenates); this one was built with t_dim={self.__t_dim}"
-        )
+        assert self.__t_dim == 0, (f"filmDims() is only meaningful for a network built with t_dim=0 "
+                                   f"(FiLM never concatenates); this one was built with t_dim={self.__t_dim}")
         return self.__filmDims
 
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:

@@ -555,9 +555,14 @@ class scalarConditionedNetworkMLP(scalarConditionedNetwork):
             self.layers.append(torch.nn.Linear(inDims, outDims, bias=True))
         self.layers.append(torch.nn.Linear(dims[-1], dims[0], bias=True))
 
+        self.__t_dim = t_dim
         self.__filmDims = dims[1:]
 
     def filmDims(self) -> List[int]:
+        assert self.__t_dim == 0, (
+            f"filmDims() is only meaningful for a network built with t_dim=0 "
+            f"(FiLM never concatenates); this one was built with t_dim={self.__t_dim}"
+        )
         return self.__filmDims
 
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
@@ -591,9 +596,14 @@ class scalarConditionedNetworkCNN(scalarConditionedNetwork):
         # ensure output of same shape as input
         self.layers.append(torch.nn.Conv2d(inChannels, inDims, kernel_size=1, bias=True))
 
+        self.__t_dim = t_dim
         self.__filmDims = [outChannels for outChannels, _ in configs]
 
     def filmDims(self) -> List[int]:
+        assert self.__t_dim == 0, (
+            f"filmDims() is only meaningful for a network built with t_dim=0 "
+            f"(FiLM never concatenates); this one was built with t_dim={self.__t_dim}"
+        )
         return self.__filmDims
 
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:

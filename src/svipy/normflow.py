@@ -665,22 +665,34 @@ class continuousNormFlow(normFlowModule):
         self.direction = direction
         self.odeMethod = odeMethod
         self.odeOptions = odeOptions
+        # kinetic energy of the last integration, ∫||f(z,t)||^2 dt per example -
+        # a diagnostic/regularization quantity (Finlay et al. 2020), refreshed
+        # on every _integrate() call. Kept as a side-channel attribute rather
+        # than a return value so this class still satisfies normFlowModule's
+        # shared (transformed, logDet) contract like every other flow type;
+        # anyone holding a continuousNormFlow instance - whether it's wrapped
+        # as a prior or a posterior - can read it after calling forward/
+        # generate/normalize.
+        self.kineticEnergy = None
 
     def _integrate(self, y, ts):
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
+        energy = torch.zeros(y.shape[0], device=y.device)  # initial kinetic energy = 0
 
         def augmentedDynamics(t, state):
-            z, lp = state
+            z, lp, e = state
             with torch.enable_grad():
                 z = z.detach().requires_grad_(True)
                 dz_dt = self.dynamics(z, t)
                 dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
-            return dz_dt, dlp_dt
+                de_dt = dz_dt.flatten(start_dim=1).pow(2).sum(dim=1)
+            return dz_dt, dlp_dt, de_dt
 
-        zt, lpt = odeint_adjoint(augmentedDynamics, (y, log_p), ts,
-                                 method=self.odeMethod, options=self.odeOptions,
-                                 adjoint_params=list(self.dynamics.parameters()))
+        zt, lpt, et = odeint_adjoint(augmentedDynamics, (y, log_p, energy), ts,
+                                     method=self.odeMethod, options=self.odeOptions,
+                                     adjoint_params=list(self.dynamics.parameters()))
 
+        self.kineticEnergy = et[-1]
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

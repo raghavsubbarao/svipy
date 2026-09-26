@@ -93,7 +93,8 @@ class variationalAutoencoder(baseTorchModel):
     but can also act as a beta VAE
     """
     def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, beta: float = 1.0,
-                 prior: normFlowPrior = None, posterior: normFlowPosterior =None, **kwargs):
+                 prior: normFlowPrior = None, posterior: normFlowPosterior = None,
+                 kineticEnergyWeight: float = 0.0, **kwargs):
         # initialization
         super(variationalAutoencoder, self).__init__(**kwargs)
         self.encoder = encoder
@@ -113,6 +114,12 @@ class variationalAutoencoder(baseTorchModel):
         # be adjusted for beta-VAEs.
         # beta > 1 allows for disentangling of generative factors [Higgins 2017]
         self.beta = beta
+
+        # Kinetic energy regularization (Finlay et al. 2020) for any prior or
+        # posterior flow that tracks one (currently continuousNormFlow) - see
+        # kineticEnergyReg(). 0.0 disables it, matching every other flow type
+        # which has no such attribute at all.
+        self.kineticEnergyWeight = kineticEnergyWeight
 
     def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         zparams = self.encoder(x)
@@ -135,7 +142,7 @@ class variationalAutoencoder(baseTorchModel):
         recon = self.decoder(zk)
         return recon, zMean, zLogVar, z0, zk, fldj
 
-    def deterministicRecon(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def deterministicRecon(self, inputs: torch.Tensor) -> torch.Tensor:
         z0, _ = self.encode(inputs)  # get the mean and variance
 
         if self.posterior:
@@ -144,6 +151,20 @@ class variationalAutoencoder(baseTorchModel):
             zk = z0
 
         return self.decoder(zk)
+
+    def kineticEnergyReg(self) -> torch.Tensor:
+        """
+        Mean kinetic energy (Finlay et al. 2020) accumulated by the prior
+        and/or posterior flow's *last* forward call, summed over whichever
+        of the two actually track it (e.g. continuousNormFlow) - 0 for any
+        flow that doesn't (IAF/MAF/realNVP), so this is always safe to call.
+        """
+        reg = torch.zeros((), device=self.device)
+        for wrapper in (self.prior, self.posterior):
+            energy = getattr(getattr(wrapper, 'flow', None), 'kineticEnergy', None)
+            if energy is not None:
+                reg = reg + energy.mean()
+        return reg
 
     def computeLoss(self, data) -> dict:
         X = data.to(self.device)
@@ -159,9 +180,12 @@ class variationalAutoencoder(baseTorchModel):
             else:
                 klLoss = klLoss - self.encoder.priorLogLikelihood(zk)
             klLoss = torch.mean(klLoss)
-        totalLoss = reconLoss + self.beta * klLoss
 
-        return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss}  # , "fldj": torch.mean(fldj)}
+        kineticReg = self.kineticEnergyReg()
+        totalLoss = reconLoss + self.beta * klLoss + self.kineticEnergyWeight * kineticReg
+
+        return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss,
+                "fldj": torch.mean(fldj), "kineticReg": kineticReg}
 
 
 #################################

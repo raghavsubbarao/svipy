@@ -135,6 +135,16 @@ class variationalAutoencoder(baseTorchModel):
         recon = self.decoder(zk)
         return recon, zMean, zLogVar, z0, zk, fldj
 
+    def deterministicRecon(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        z0, _ = self.encode(inputs)  # get the mean and variance
+
+        if self.posterior:
+            zk, _ = self.posterior_module(z0)
+        else:
+            zk = z0
+
+        return self.decoder(zk)
+
     def computeLoss(self, data) -> dict:
         X = data.to(self.device)
         recon, zMean, zLogVar, z0, zk, fldj = self.forward(X)
@@ -151,7 +161,7 @@ class variationalAutoencoder(baseTorchModel):
             klLoss = torch.mean(klLoss)
         totalLoss = reconLoss + self.beta * klLoss
 
-        return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss}
+        return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss}  # , "fldj": torch.mean(fldj)}
 
 
 #################################

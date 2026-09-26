@@ -657,11 +657,14 @@ class timeConditionedField(torch.nn.Module):
 
 
 class continuousNormFlow(normFlowModule):
-    def __init__(self, dynamics: timeConditionedField, direction='generate'):
+    def __init__(self, dynamics: timeConditionedField, direction='generate',
+                 odeMethod='rk4', odeOptions={'step_size': 0.05}):
         super(continuousNormFlow, self).__init__()
         self.dynamics = dynamics
         assert direction in ('normalize', 'generate')
         self.direction = direction
+        self.odeMethod = odeMethod
+        self.odeOptions = odeOptions
 
     def _integrate(self, y, ts):
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
@@ -675,8 +678,9 @@ class continuousNormFlow(normFlowModule):
             return dz_dt, dlp_dt
 
         zt, lpt = odeint_adjoint(augmentedDynamics, (y, log_p), ts,
-                                 method='rk4', options={'step_size': 0.05},
+                                 method=self.odeMethod, options=self.odeOptions,
                                  adjoint_params=list(self.dynamics.parameters()))
+
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

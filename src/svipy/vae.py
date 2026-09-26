@@ -93,7 +93,7 @@ class variationalAutoencoder(baseTorchModel):
     but can also act as a beta VAE
     """
     def __init__(self, encoder: vaeEncoder, decoder: vaeDecoder, beta: float = 1.0,
-                 prior: normFlowPrior = None, posterior: normFlowPosterior =None,
+                 prior: normFlowPrior = None, posterior: normFlowPosterior = None,
                  kineticEnergyWeight: float = 0.0, **kwargs):
         # initialization
         super(variationalAutoencoder, self).__init__(**kwargs)
@@ -142,7 +142,7 @@ class variationalAutoencoder(baseTorchModel):
         recon = self.decoder(zk)
         return recon, zMean, zLogVar, z0, zk, fldj
 
-    def deterministicRecon(self, inputs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def deterministicRecon(self, inputs: torch.Tensor) -> torch.Tensor:
         z0, _ = self.encode(inputs)  # get the mean and variance
 
         if self.posterior:

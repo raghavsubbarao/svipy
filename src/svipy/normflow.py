@@ -675,6 +675,16 @@ class continuousNormFlow(normFlowModule):
         # generate/normalize.
         self.kineticEnergy = None
 
+        # kinetic energy of the last integration, ∫||f(z,t)||^2 dt per example -
+        # a diagnostic/regularization quantity (Finlay et al. 2020), refreshed
+        # on every _integrate() call. Kept as a side-channel attribute rather
+        # than a return value so this class still satisfies normFlowModule's
+        # shared (transformed, logDet) contract like every other flow type;
+        # anyone holding a continuousNormFlow instance - whether it's wrapped
+        # as a prior or a posterior - can read it after calling forward/
+        # generate/normalize.
+        self.kineticEnergy = None
+
     def _integrate(self, y, ts):
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
         energy = torch.zeros(y.shape[0], device=y.device)  # initial kinetic energy = 0

@@ -57,9 +57,8 @@ class normFlowSequential(torch.nn.Sequential, normFlowModule):
 
 
 class normFlowPrior(abc.ABC):
-    def __init__(self, flow: normFlowModule, dim: int):
+    def __init__(self, flow: normFlowModule):
         self.flow = flow
-        self.dim = dim
 
     @abc.abstractmethod
     def baseLikelihood(self, z: torch.Tensor) -> torch.Tensor:
@@ -71,24 +70,25 @@ class normFlowPrior(abc.ABC):
         return logBase + logDet
 
 class normFlowPriorUniform(normFlowPrior):
-    def __init__(self, flow: normFlowModule, dim: int):
-        super(normFlowPriorUniform, self).__init__(flow, dim)
+    def __init__(self, flow: normFlowModule):
+        super(normFlowPriorUniform, self).__init__(flow)
 
     def baseLikelihood(self, u):
         return 0
 
 class normFlowPriorNormal(normFlowPrior):
-    def __init__(self, flow: normFlowModule, dim: int):
-        super(normFlowPriorNormal, self).__init__(flow, dim)
+    def __init__(self, flow: normFlowModule):
+        super(normFlowPriorNormal, self).__init__(flow)
 
     def baseLikelihood(self, u):
-        return -0.5 * (u.pow(2).flatten(start_dim=1).sum(dim=1) + self.dim * math.log(2 * math.pi))
+        dim = u.flatten(start_dim=1).shape[1]
+        return -0.5 * (u.pow(2).flatten(start_dim=1).sum(dim=1) + dim * math.log(2 * math.pi))
 
 
 class normFlowPosterior:
-    def __init__(self, flow: normFlowModule, dim: int):
+    def __init__(self, flow: normFlowModule):
         self.flow = flow
-        self.dim = dim
+        # self.dim = dim
 
     def logDetJacobian(self, u: torch.Tensor) -> torch.Tensor:
         _, logDet = self.flow(u)
@@ -507,13 +507,6 @@ class filmTimeEmbedding(timeEmbedding):
         beta = self._expandToMatch(beta, out)
         return gamma * out + beta
 
-# probes for hutchinson estimator
-def gaussianProbe(z: torch.Tensor) -> torch.Tensor:
-    return torch.randn_like(z)
-
-def rademacherProbe(z: torch.Tensor) -> torch.Tensor:
-    return torch.randint(0, 2, z.shape, device=z.device, dtype=z.dtype) * 2 - 1
-
 
 # take input and time to produce flow/velocity fields
 class scalarConditionedNetwork(torch.nn.Module, abc.ABC):
@@ -610,6 +603,13 @@ class scalarConditionedNetworkCNN(scalarConditionedNetwork):
             h = self.activation(embedding.combine(i, h, layer, t_embed))
         return self.layers[-1](h)
 
+
+# probes for hutchinson estimator
+def gaussianProbe(z: torch.Tensor) -> torch.Tensor:
+    return torch.randn_like(z)
+
+def rademacherProbe(z: torch.Tensor) -> torch.Tensor:
+    return torch.randint(0, 2, z.shape, device=z.device, dtype=z.dtype) * 2 - 1
 
 class timeConditionedField(torch.nn.Module):
     """

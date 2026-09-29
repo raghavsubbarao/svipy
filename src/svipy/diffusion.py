@@ -109,9 +109,17 @@ class varPreservingConditionalPath(conditionalPath):
         :param x1:
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
+
+        alpha/dalpha/sigma/dsigma follow the standard diffusion convention
+        (s=0 is clean data, s=1 is noise). The rest of this codebase - the
+        OT linearConditionalPath, conditionalFlowMatcher, and
+        continuousNormFlow.generate()/interpolate() - uses the opposite
+        convention (t=0 is noise, t=1 is data), so time is flipped here
+        (s = 1 - t) before delegating to those methods.
         """
         tx = self._expand(t, x0)
-        return self.alpha(tx) * x1 + self.sigma(tx) * x0, self.dalpha(tx) * x1 + self.dsigma(tx) * x0
+        s = 1. - tx
+        return self.alpha(s) * x1 + self.sigma(s) * x0, -(self.dalpha(s) * x1 + self.dsigma(s) * x0)
 
 
 class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):

@@ -46,6 +46,28 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         return t.view(t.shape[0], *([1] * (x.dim() - 1))) if t.dim() == 1 else t
 
 
+class reversedConditionalPath(conditionalPath):
+    """
+    Presents a wrapped conditionalPath under the opposite time convention -
+    t=0 becomes t=1 and vice versa - without touching the wrapped path's own
+    formulas. Used to adapt paths written in the standard diffusion
+    convention (t=0 data, t=1 noise - e.g. varPreservingConditionalPath and
+    its subclasses) to the convention conditionalFlowMatcher and
+    continuousNormFlow.generate()/interpolate() assume (t=0 noise, t=1
+    data), while leaving the wrapped path available in its native form for
+    diffusion-specific use (noise schedules, SNR weighting, etc.) that wants
+    the original convention.
+    """
+    def __init__(self, path: conditionalPath):
+        super(reversedConditionalPath, self).__init__()
+        self.path = path
+
+    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # t is unexpanded (B,) here - the wrapped path does its own _expand
+        xt, ut = self.path(x0, x1, 1. - t)
+        return xt, -ut
+
+
 class linearConditionalPath(conditionalPath):
     def __init__(self, minSigma=1e-4):
         super(linearConditionalPath, self).__init__()
@@ -107,19 +129,16 @@ class varPreservingConditionalPath(conditionalPath):
         """
         :param x0: B x ... tensor where B=batch_size
         :param x1:
-        :param t:
+        :param t: t=0 is clean data, t=1 is noise - the standard diffusion
+            convention, matching alpha/dalpha/sigma/dsigma and the papers
+            they're taken from. This is the OPPOSITE of linearConditionalPath
+            (and of conditionalFlowMatcher/continuousNormFlow, which assume
+            t=0 is noise, t=1 is data) - wrap with reversedConditionalPath to
+            present this path under that convention instead.
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
-
-        alpha/dalpha/sigma/dsigma follow the standard diffusion convention
-        (s=0 is clean data, s=1 is noise). The rest of this codebase - the
-        OT linearConditionalPath, conditionalFlowMatcher, and
-        continuousNormFlow.generate()/interpolate() - uses the opposite
-        convention (t=0 is noise, t=1 is data), so time is flipped here
-        (s = 1 - t) before delegating to those methods.
         """
         tx = self._expand(t, x0)
-        s = 1. - tx
-        return self.alpha(s) * x1 + self.sigma(s) * x0, -(self.dalpha(s) * x1 + self.dsigma(s) * x0)
+        return self.alpha(tx) * x1 + self.sigma(tx) * x0, self.dalpha(tx) * x1 + self.dsigma(tx) * x0
 
 
 class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):

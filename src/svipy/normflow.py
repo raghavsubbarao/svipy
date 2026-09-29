@@ -705,6 +705,9 @@ class continuousNormFlow(normFlowModule):
         self.kineticEnergy = et[-1]
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
+    def interpolate(self, y: torch.Tensor, t0: float, t1: float) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self._integrate(y, torch.tensor([t0, t1], device=y.device))
+
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))
 

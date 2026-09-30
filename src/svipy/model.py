@@ -7,7 +7,9 @@ import torch
 class baseTorchModel(torch.nn.Module, abc.ABC):
     def __init__(self, *args, **kwargs):
         super(baseTorchModel, self).__init__(*args, **kwargs)
-        self.trainTrackers = lossTrackerCollection()
+        self.trainTrackers = lossTrackerCollection()  # per
+        self.epochTrackers = {'train': lossTrackerCollection(),
+                              'valid': lossTrackerCollection()}  # per epoch
 
     @property
     def device(self):
@@ -42,11 +44,9 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         return self.computeLoss(data)
 
     def trainLoop(self, trainDataLoader, optimizer, epochs,
-                  reportIters=100,
-                  scheduler=None,
+                  reportIters=100, scheduler=None,
                   checkpointPath=None, checkPointName=None,
-                  validDataLoader=None,
-                  earlyStopper=None,
+                  validDataLoader=None, earlyStopper=None,
                   annealers=None):
 
         if earlyStopper is not None and validDataLoader is None:
@@ -54,6 +54,10 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
 
         annealers = annealers or []
         trainSize = len(trainDataLoader.dataset)
+
+        self.trainTrackers.clear()
+        self.epochTrackers['train'].clear()
+        self.epochTrackers['valid'].clear()
 
         for t in range(epochs):
             print(f"Epoch {t + 1}\n-------------------------------")
@@ -66,12 +70,18 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
             # in case theres a validation dataset
             self.train()
 
+            trainTotals, nTrainBatches = {}, 0
             for batch, data in enumerate(trainDataLoader):
                 metrics = self.trainStep(data, optimizer)
+                for name, value in metrics.items():
+                    trainTotals[name] = trainTotals.get(name, 0.0) + value.item()
+                nTrainBatches += 1
 
                 if (batch + 1) % reportIters == 0:
                     print(' '.join([f'{l}: {metrics[l]:>7f}' for l in metrics]) +
                           f'[{(batch + 1) * trainDataLoader.batch_size:>5d}/{trainSize:>5d}]')
+
+            self.epochTrackers['train'].update({name: total / nTrainBatches for name, total in trainTotals.items()})
 
             validationLoss = None
             if validDataLoader:
@@ -86,6 +96,7 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
 
                 validMetrics = {name: total / nBatches for name, total in totals.items()}
                 validationLoss = validMetrics['totalLoss']
+                self.epochTrackers['valid'].update(validMetrics)
 
                 print(f"Validation Error: {validationLoss:>7f}")
 
@@ -239,6 +250,52 @@ class lossTrackerCollection:
     def clear(self):
         for tracker in self.__trackers.values():
             tracker.clear()
+
+    def plot(self, axes: dict, **lineKwargs):
+        """
+        Draw each tracked metric's history (by index - epoch or batch,
+        whichever this collection was updated at) onto a caller-supplied
+        axes. Metrics with no matching key in `axes` are skipped, so several
+        collections with only partially-overlapping metric names can share
+        the same set of subplots.
+        :param axes: dict mapping metric name -> matplotlib Axes to draw on.
+        """
+        for name, tracker in self.trackers.items():
+            if name in axes:
+                axes[name].plot(tracker.losses, **lineKwargs)
+
+    @staticmethod
+    def plotComparison(histories: dict, figsize=None):
+        """
+        One subplot per metric name (union across all given collections), so
+        metrics on very different scales (e.g. totalLoss vs klLoss) each get
+        their own y-axis instead of collapsing onto a shared one.
+        :param histories: named collections to overlay, e.g.
+               {'train': model.epochTrackers['train'], 'valid': model.epochTrackers['valid']}
+        :return: (fig, axes) - axes is a dict keyed by metric name, so callers
+                 can keep customizing individual subplots afterwards.
+        """
+        import matplotlib.pyplot as plt
+
+        names = []
+        for collection in histories.values():
+            for name in collection.trackers:
+                if name not in names:
+                    names.append(name)
+
+        fig, axesList = plt.subplots(len(names), 1, figsize=figsize or (6, 3 * len(names)), squeeze=False)
+        axes = {name: axesList[i, 0] for i, name in enumerate(names)}
+
+        for splitName, collection in histories.items():
+            collection.plot(axes, label=splitName)
+
+        for name, ax in axes.items():
+            ax.set_title(name)
+            ax.set_xlabel('epoch')
+            ax.legend()
+
+        fig.tight_layout()
+        return fig, axes
 
 
 class reshape(torch.nn.Module):

@@ -702,14 +702,14 @@ class continuousNormFlow(normFlowModule):
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
         state = (y, log_p, torch.zeros(y.shape[0], device=y.device)) if trackKineticEnergy else (y, log_p)
 
-        def augmentedDynamics(t, state):
+        def augmentedDynamics(t, s):
             with torch.enable_grad():
-                z = state[0].detach().requires_grad_(True)
+                z = s[0].detach().requires_grad_(True)
                 dz_dt = self.dynamics(z, t)
                 dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
-            if trackKineticEnergy:
-                return dz_dt, dlp_dt, dz_dt.flatten(start_dim=1).pow(2).sum(dim=1)
-            return dz_dt, dlp_dt
+                if trackKineticEnergy:
+                    return dz_dt, dlp_dt, dz_dt.flatten(start_dim=1).pow(2).sum(dim=1)
+                return dz_dt, dlp_dt
 
         if useAdjoint:
             result = odeint_adjoint(augmentedDynamics, state, ts,
@@ -729,7 +729,8 @@ class continuousNormFlow(normFlowModule):
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
     def interpolate(self, y: torch.Tensor, t0: float, t1: float) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self._integrate(y, torch.tensor([t0, t1], device=y.device), useAdjoint=False, trackKineticEnergy=False)
+        return self._integrate(y, torch.tensor([t0, t1], device=y.device),
+                               useAdjoint=False, trackKineticEnergy=False)
 
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))

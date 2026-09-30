@@ -31,6 +31,7 @@ from svipy.normflow import (
 
 from svipy.diffusion import (
     conditionalPath,
+    reversedConditionalPath,
     linearConditionalPath,
     varPreservingConditionalPath,
     varPreservingConditionalPathTrigonometric,

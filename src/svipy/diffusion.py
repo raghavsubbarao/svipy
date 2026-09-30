@@ -46,6 +46,28 @@ class conditionalPath(torch.nn.Module, abc.ABC):
         return t.view(t.shape[0], *([1] * (x.dim() - 1))) if t.dim() == 1 else t
 
 
+class reversedConditionalPath(conditionalPath):
+    """
+    Presents a wrapped conditionalPath under the opposite time convention -
+    t=0 becomes t=1 and vice versa - without touching the wrapped path's own
+    formulas. Used to adapt paths written in the standard diffusion
+    convention (t=0 data, t=1 noise - e.g. varPreservingConditionalPath and
+    its subclasses) to the convention conditionalFlowMatcher and
+    continuousNormFlow.generate()/interpolate() assume (t=0 noise, t=1
+    data), while leaving the wrapped path available in its native form for
+    diffusion-specific use (noise schedules, SNR weighting, etc.) that wants
+    the original convention.
+    """
+    def __init__(self, path: conditionalPath):
+        super(reversedConditionalPath, self).__init__()
+        self.path = path
+
+    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # t is unexpanded (B,) here - the wrapped path does its own _expand
+        xt, ut = self.path(x0, x1, 1. - t)
+        return xt, -ut
+
+
 class linearConditionalPath(conditionalPath):
     def __init__(self, minSigma=1e-4):
         super(linearConditionalPath, self).__init__()

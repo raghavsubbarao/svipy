@@ -5,7 +5,7 @@ import numpy as np
 from typing import Optional, Iterable, Union, overload, Tuple, List
 
 import torch
-from torchdiffeq import odeint_adjoint
+from torchdiffeq import odeint_adjoint, odeint
 
 from svipy.model import baseTorchModel
 
@@ -697,7 +697,17 @@ class continuousNormFlow(normFlowModule):
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
     def interpolate(self, y: torch.Tensor, t0: float, t1: float) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self._integrate(y, torch.tensor([t0, t1], device=y.device))
+        log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
+
+        def augmentedDynamics(t, state):
+            z, lp = state
+            dz_dt = self.dynamics(z, t)
+            dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
+            return dz_dt, dlp_dt
+
+        zt, lpt = odeint(augmentedDynamics, (y, log_p), torch.tensor([t0, t1], device=y.device),
+                         method=self.odeMethod, options=self.odeOptions)
+        return zt, lpt
 
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))

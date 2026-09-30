@@ -7,7 +7,9 @@ import torch
 class baseTorchModel(torch.nn.Module, abc.ABC):
     def __init__(self, *args, **kwargs):
         super(baseTorchModel, self).__init__(*args, **kwargs)
-        self.trainTrackers = lossTrackerCollection()  # per
+
+        # todo: do we need per-batch tracking? remove if not required
+        self.trainTrackers = lossTrackerCollection()  # per batch
         self.epochTrackers = {'train': lossTrackerCollection(),
                               'valid': lossTrackerCollection()}  # per epoch
 

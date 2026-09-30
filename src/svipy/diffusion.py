@@ -130,7 +130,12 @@ class varPreservingConditionalPath(conditionalPath):
         :param x0: B x ... tensor where B=batch_size
         :param x1:
         :param t:
-        :return: tensor of size (B,) of inverse log determinant of the Jacobians
+        :return: t=0 is clean data, t=1 is noise - the standard diffusion
+                 convention, matching alpha/dalpha/sigma/dsigma and the papers
+                 they're taken from. This is the OPPOSITE of linearConditionalPath
+                 (and of conditionalFlowMatcher/continuousNormFlow, which assume
+                 t=0 is noise, t=1 is data) - wrap with reversedConditionalPath to
+                 present this path under that convention instead.
         """
         tx = self._expand(t, x0)
         return self.alpha(tx) * x1 + self.sigma(tx) * x0, self.dalpha(tx) * x1 + self.dsigma(tx) * x0

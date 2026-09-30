@@ -668,46 +668,67 @@ class continuousNormFlow(normFlowModule):
 
         # kinetic energy of the last integration, ∫||f(z,t)||^2 dt per example -
         # a diagnostic/regularization quantity (Finlay et al. 2020), refreshed
-        # on every _integrate() call. Kept as a side-channel attribute rather
-        # than a return value so this class still satisfies normFlowModule's
-        # shared (transformed, logDet) contract like every other flow type;
-        # anyone holding a continuousNormFlow instance - whether it's wrapped
-        # as a prior or a posterior - can read it after calling forward/
-        # generate/normalize.
+        # on every _integrate() call that tracks it. Kept as a side-channel
+        # attribute rather than a return value so this class still satisfies
+        # normFlowModule's shared (transformed, logDet) signature like every
+        # other flow type; anyone holding a continuousNormFlow instance -
+        # whether it's wrapped as a prior or a posterior - can read it after
+        # calling forward/generate/normalize. None after a call that opts
+        # out of tracking it (interpolate()), rather than silently holding a
+        # stale value from a previous generate()/normalize() call.
         self.kineticEnergy = None
 
-    def _integrate(self, y, ts):
-        log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
-        energy = torch.zeros(y.shape[0], device=y.device)  # initial kinetic energy = 0
+    def _integrate(self, y, ts, useAdjoint=True, trackKineticEnergy=True):
+        """
+        useAdjoint=True uses odeint_adjoint's O(1)-memory continuous adjoint
+        method vs plain odeint. Only relevant when something outside this
+        call needs to backprop thru the integration into self.dynamics.parameters()
+        (e.g. generate()/normalize() used inside a VAE's training loss)
+        - pass False for pure sampling/inference use (e.g. interpolate() called
+        under torch.no_grad()), where odeint avoids the adjoint bookkeeping cost.
 
-        def augmentedDynamics(t, state):
-            z, lp, e = state
+        trackKineticEnergy adds a third augmented ODE state (see self.kineticEnergy
+        above) that the solver has to carry and step alongside z and the log-det -
+        a cost for callers that never read it, so interpolate() opts out.
+
+        Neither flag affects the enable_grad/requires_grad_ below - that's required
+        by hutchinsonTrace's internal torch.autograd.grad call, which needs z to
+        require grad at the point dz_dt is computed regardless of solver choice or
+        whether the caller wants gradients afterward. Dropping it breaks the log-det
+        estimate outright, even with useAdjoint=False.
+        """
+        log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
+        state = (y, log_p, torch.zeros(y.shape[0], device=y.device)) if trackKineticEnergy else (y, log_p)
+
+        def augmentedDynamics(t, s):
             with torch.enable_grad():
-                z = z.detach().requires_grad_(True)
+                z = s[0].detach().requires_grad_(True)
                 dz_dt = self.dynamics(z, t)
                 dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
-                de_dt = dz_dt.flatten(start_dim=1).pow(2).sum(dim=1)
-            return dz_dt, dlp_dt, de_dt
+                if trackKineticEnergy:
+                    return dz_dt, dlp_dt, dz_dt.flatten(start_dim=1).pow(2).sum(dim=1)
+                return dz_dt, dlp_dt
 
-        zt, lpt, et = odeint_adjoint(augmentedDynamics, (y, log_p, energy), ts,
-                                     method=self.odeMethod, options=self.odeOptions,
-                                     adjoint_params=list(self.dynamics.parameters()))
+        if useAdjoint:
+            result = odeint_adjoint(augmentedDynamics, state, ts,
+                                    method=self.odeMethod, options=self.odeOptions,
+                                    adjoint_params=list(self.dynamics.parameters()))
+        else:
+            result = odeint(augmentedDynamics, state, ts,
+                            method=self.odeMethod, options=self.odeOptions)
 
-        self.kineticEnergy = et[-1]
+        if trackKineticEnergy:
+            zt, lpt, et = result
+            self.kineticEnergy = et[-1]
+        else:
+            zt, lpt = result
+            self.kineticEnergy = None
+
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
     def interpolate(self, y: torch.Tensor, t0: float, t1: float) -> Tuple[torch.Tensor, torch.Tensor]:
-        log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
-
-        def augmentedDynamics(t, state):
-            z, lp = state
-            dz_dt = self.dynamics(z, t)
-            dlp_dt = -self.dynamics.hutchinsonTrace(z, t, dz_dt)
-            return dz_dt, dlp_dt
-
-        zt, lpt = odeint(augmentedDynamics, (y, log_p), torch.tensor([t0, t1], device=y.device),
-                         method=self.odeMethod, options=self.odeOptions)
-        return zt, lpt
+        return self._integrate(y, torch.tensor([t0, t1], device=y.device),
+                               useAdjoint=False, trackKineticEnergy=False)
 
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))

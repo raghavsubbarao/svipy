@@ -5,7 +5,7 @@ import numpy as np
 from typing import Optional, Iterable, Union, overload, Tuple, List
 
 import torch
-from torchdiffeq import odeint_adjoint
+from torchdiffeq import odeint_adjoint, odeint
 
 from svipy.model import baseTorchModel
 
@@ -685,7 +685,23 @@ class continuousNormFlow(normFlowModule):
         # generate/normalize.
         self.kineticEnergy = None
 
-    def _integrate(self, y, ts):
+    def _integrate(self, y, ts, useAdjoint=True):
+        """
+        useAdjoint picks odeint_adjoint's O(1)-memory continuous adjoint
+        method vs plain odeint. Only relevant when something outside this
+        call needs to backprop through the integration into
+        self.dynamics.parameters() (e.g. generate()/normalize() used inside
+        a VAE's training loss) - pass False for pure sampling/inference use
+        (e.g. interpolate() called under torch.no_grad()), where plain
+        odeint avoids the adjoint bookkeeping for no cost.
+
+        Either way, the enable_grad/requires_grad_ dance below is NOT about
+        that choice - it's required by hutchinsonTrace's internal
+        torch.autograd.grad call, which needs z to require grad at the point
+        dz_dt is computed regardless of solver or of whether the caller
+        wants gradients afterward. Dropping it breaks the log-det estimate
+        outright, even with useAdjoint=False.
+        """
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
         energy = torch.zeros(y.shape[0], device=y.device)  # initial kinetic energy = 0
 
@@ -698,15 +714,19 @@ class continuousNormFlow(normFlowModule):
                 de_dt = dz_dt.flatten(start_dim=1).pow(2).sum(dim=1)
             return dz_dt, dlp_dt, de_dt
 
-        zt, lpt, et = odeint_adjoint(augmentedDynamics, (y, log_p, energy), ts,
-                                     method=self.odeMethod, options=self.odeOptions,
-                                     adjoint_params=list(self.dynamics.parameters()))
+        if useAdjoint:
+            zt, lpt, et = odeint_adjoint(augmentedDynamics, (y, log_p, energy), ts,
+                                         method=self.odeMethod, options=self.odeOptions,
+                                         adjoint_params=list(self.dynamics.parameters()))
+        else:
+            zt, lpt, et = odeint(augmentedDynamics, (y, log_p, energy), ts,
+                                 method=self.odeMethod, options=self.odeOptions)
 
         self.kineticEnergy = et[-1]
         return zt[-1], lpt[-1]  # odeint returns values at all t, take the final
 
     def interpolate(self, y: torch.Tensor, t0: float, t1: float) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self._integrate(y, torch.tensor([t0, t1], device=y.device))
+        return self._integrate(y, torch.tensor([t0, t1], device=y.device), useAdjoint=False)
 
     def generate(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self._integrate(y, torch.tensor([0., 1.], device=y.device))

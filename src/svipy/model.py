@@ -7,9 +7,11 @@ import torch
 class baseTorchModel(torch.nn.Module, abc.ABC):
     def __init__(self, *args, **kwargs):
         super(baseTorchModel, self).__init__(*args, **kwargs)
-        self.trainTrackers = lossTrackerCollection()  # one entry per batch
+
+        # todo: do we need per-batch tracking? remove if not required
+        self.trainTrackers = lossTrackerCollection()  # per batch
         self.epochTrackers = {'train': lossTrackerCollection(),
-                              'valid': lossTrackerCollection()}  # one entry per epoch, for loss-vs-epoch charts
+                              'valid': lossTrackerCollection()}  # per epoch, for loss-vs-epoch charts
 
     @property
     def device(self):
@@ -44,11 +46,9 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         return self.computeLoss(data)
 
     def trainLoop(self, trainDataLoader, optimizer, epochs,
-                  reportIters=100,
-                  scheduler=None,
+                  reportIters=100, scheduler=None,
                   checkpointPath=None, checkPointName=None,
-                  validDataLoader=None,
-                  earlyStopper=None,
+                  validDataLoader=None, earlyStopper=None,
                   annealers=None):
 
         if earlyStopper is not None and validDataLoader is None:

@@ -52,7 +52,7 @@ class reversedConditionalPath(conditionalPath):
     t=0 becomes t=1 and vice versa - without touching the wrapped path's own
     formulas. Used to adapt paths written in the standard diffusion
     convention (t=0 data, t=1 noise - e.g. varPreservingConditionalPath and
-    its subclasses) to the convention conditionalFlowMatcher and
+    its subclasses) to the flow matching convention and
     continuousNormFlow.generate()/interpolate() assume (t=0 noise, t=1
     data), while leaving the wrapped path available in its native form for
     diffusion-specific use (noise schedules, SNR weighting, etc.) that wants
@@ -108,8 +108,11 @@ class conditionalFlowMatcher(baseTorchModel):
 #################################
 
 class varPreservingConditionalPath(conditionalPath):
-    def __init__(self):
+    def __init__(self, target='score'):
         super(varPreservingConditionalPath, self).__init__()
+
+        assert target in ['velocity', 'score']
+        self.target = target
 
     @abc.abstractmethod
     def alpha(self, t):
@@ -125,20 +128,32 @@ class varPreservingConditionalPath(conditionalPath):
     def dsigma(self, t):
         return -self.alpha(t) * self.dalpha(t) / self.sigma(t)
 
-    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x1: torch.Tensor, x0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        :param x0: B x ... tensor where B=batch_size
-        :param x1:
-        :param t: t=0 is clean data, t=1 is noise - the standard diffusion
-            convention, matching alpha/dalpha/sigma/dsigma and the papers
-            they're taken from. This is the OPPOSITE of linearConditionalPath
-            (and of conditionalFlowMatcher/continuousNormFlow, which assume
-            t=0 is noise, t=1 is data) - wrap with reversedConditionalPath to
-            present this path under that convention instead.
+        :param x1: noise (for diffusion/score matching) - B x ... where B=batch_size
+        :param x0: data (for diffusion/score matching) - B x ... where B=batch_size
+        :param t:t=0 is clean data, t=1 is noise - the standard diffusion
+                 convention, matching alpha/dalpha/sigma/dsigma and the papers
+                 they're taken from. This is the OPPOSITE of linearConditionalPath
+                 (and of conditionalFlowMatcher/continuousNormFlow, which assume
+                 t=0 is noise, t=1 is data) - wrap with reversedConditionalPath to
+                 present this path for flow matching
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        tx = self._expand(t, x0)
-        return self.alpha(tx) * x1 + self.sigma(tx) * x0, self.dalpha(tx) * x1 + self.dsigma(tx) * x0
+        tx = self._expand(t, x1)
+        xt = self.alpha(tx) * x0 + self.sigma(tx) * x1
+        if self.target == 'velocity':
+            target = self.dalpha(tx) * x0 + self.dsigma(tx) * x1
+        elif self.target == 'score':
+            # the score is given by -x1/sigma(t), but we return -x0 as
+            # the regression target. this is to avoid the loss driven by
+            # regions where sigma(t)->0. therefore we match the noise
+            # directly and then return the score only at inference time
+            target = - x1
+        else:
+            raise Exception(f'Unknown target type: {self.target}')
+
+        return xt, target
 
 
 class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):
@@ -191,6 +206,25 @@ class varPreservingConditionalPathLinear(varPreservingConditionalPath):
 
     def dalpha(self, t):
         return - self.beta(t) * self.alpha(t) / 2.0
+
+
+class conditionalScoreMatcher(baseTorchModel):
+    def __init__(self, pathGenerator: conditionalPath, scoreField: timeConditionedField):
+        super(conditionalFlowMatcher, self).__init__()
+        self.pathGenerator = pathGenerator
+        self.scoreField = scoreField
+
+    def computeLoss(self, data) -> dict:
+        X0 = data.to(self.device)
+        X1 = torch.randn_like(X1, device=self.device)
+        t = torch.rand(X0.shape[0], device=self.device)
+
+        Xt, Ut = self.pathGenerator(X1, X0, t)
+        Vt = self.scoreField(Xt, t)
+
+        totalLoss = torch.mean(torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1))
+
+        return {"totalLoss": totalLoss}
 
 
 if __name__ == "__main__":

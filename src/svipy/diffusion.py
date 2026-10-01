@@ -17,6 +17,16 @@ class conditionalPath(torch.nn.Module, abc.ABC):
     def __init__(self):
         super(conditionalPath, self).__init__()
 
+        # Sign forward()'s second output picks up when time is relabeled t->1-t
+        # (as reversedConditionalPath does). -1 for a time-derivative quantity
+        # like velocity (chain rule: dt/ds=-1 under t=1-s); +1 for a quantity
+        # with no time derivative in its definition, like score, which is just
+        # evaluated at the relabeled time rather than differentiated through it.
+        # Every path that predates the score/velocity split only ever produces
+        # velocity, so -1 is the right default; only varPreservingConditionalPath
+        # overrides this, and only for target='score'.
+        self.reverseSign = -1.0
+
     @abc.abstractmethod
     def forward(self, xn, xd, t) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return (x_t, u_t): interpolated point and its target velocity."""
@@ -65,7 +75,7 @@ class reversedConditionalPath(conditionalPath):
     def forward(self, xn: torch.Tensor, xd: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # t is unexpanded (B,) here - the wrapped path does its own _expand
         xt, ut = self.path(xn, xd, 1. - t)
-        return xt, -ut
+        return xt, self.reverseSign * ut
 
 
 class linearConditionalPath(conditionalPath):
@@ -113,6 +123,7 @@ class varPreservingConditionalPath(conditionalPath):
 
         assert target in ['velocity', 'score']
         self.target = target
+        self.reverseSign = -1.0 if target == 'velocity' else 1.0
 
     @abc.abstractmethod
     def alpha(self, t):
@@ -226,6 +237,3 @@ class conditionalScoreMatcher(baseTorchModel):
 
         return {"totalLoss": totalLoss}
 
-
-if __name__ == "__main__":
-    pass

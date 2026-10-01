@@ -17,28 +17,38 @@ class conditionalPath(torch.nn.Module, abc.ABC):
     def __init__(self):
         super(conditionalPath, self).__init__()
 
+        # Sign forward()'s second output picks up when time is relabeled t->1-t
+        # (as reversedConditionalPath does). -1 for a time-derivative quantity
+        # like velocity (chain rule: dt/ds=-1 under t=1-s); +1 for a quantity
+        # with no time derivative in its definition, like score, which is just
+        # evaluated at the relabeled time rather than differentiated through it.
+        # Every path that predates the score/velocity split only ever produces
+        # velocity, so -1 is the right default; only varPreservingConditionalPath
+        # overrides this, and only for target='score'.
+        self.reverseSign = -1.0
+
     @abc.abstractmethod
-    def forward(self, x0, x1, t) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, xn, xd, t) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return (x_t, u_t): interpolated point and its target velocity."""
         pass
 
-    def generate(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def generate(self, xn: torch.Tensor, xd: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        :param x0: B x ... tensor where B=batch_size
-        :param x1:
+        :param xn: B x ... tensor where B=batch_size
+        :param xd:
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        return self.forward(x0, x1, t)[0]
+        return self.forward(xn, xd, t)[0]
 
-    def velocity(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def velocity(self, xn: torch.Tensor, xd: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        :param x0: B x ... tensor where B=batch_size
-        :param x1:
+        :param xn: B x ... tensor where B=batch_size
+        :param xd:
         :param t:`
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        return self.forward(x0, x1, t)[1]
+        return self.forward(xn, xd, t)[1]
 
     @staticmethod
     def _expand(t, x):
@@ -62,10 +72,10 @@ class reversedConditionalPath(conditionalPath):
         super(reversedConditionalPath, self).__init__()
         self.path = path
 
-    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, xn: torch.Tensor, xd: torch.Tensor, t: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         # t is unexpanded (B,) here - the wrapped path does its own _expand
-        xt, ut = self.path(x0, x1, 1. - t)
-        return xt, -ut
+        xt, ut = self.path(xn, xd, 1. - t)
+        return xt, self.reverseSign * ut
 
 
 class linearConditionalPath(conditionalPath):
@@ -73,15 +83,15 @@ class linearConditionalPath(conditionalPath):
         super(linearConditionalPath, self).__init__()
         self.minSigma = minSigma
 
-    def forward(self, x0: torch.Tensor, x1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, xn: torch.Tensor, xd: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        :param x0: B x ... tensor where B=batch_size
-        :param x1:
+        :param xn: B x ... tensor where B=batch_size
+        :param xd:
         :param t:
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        tx = self._expand(t, x0)
-        return tx * x1 + (1 - (1 - self.minSigma) * tx) * x0, x1 - (1 - self.minSigma) * x0
+        tx = self._expand(t, xn)
+        return tx * xd + (1 - (1 - self.minSigma) * tx) * xn, xd - (1 - self.minSigma) * xn
 
 
 class conditionalFlowMatcher(baseTorchModel):
@@ -91,11 +101,11 @@ class conditionalFlowMatcher(baseTorchModel):
         self.velocityField = velocityField
 
     def computeLoss(self, data) -> dict:
-        X1 = data.to(self.device)
-        X0 = torch.randn_like(X1, device=self.device)
-        t = torch.rand(X1.shape[0], device=self.device)
+        Xd = data.to(self.device)
+        Xn = torch.randn_like(Xd, device=self.device)
+        t = torch.rand(Xd.shape[0], device=self.device)
 
-        Xt, Ut = self.pathGenerator(X0, X1, t)
+        Xt, Ut = self.pathGenerator(Xn, Xd, t)
         Vt = self.velocityField(Xt, t)
 
         totalLoss = torch.mean(torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1))
@@ -113,6 +123,7 @@ class varPreservingConditionalPath(conditionalPath):
 
         assert target in ['velocity', 'score']
         self.target = target
+        self.reverseSign = -1.0 if target == 'velocity' else 1.0
 
     @abc.abstractmethod
     def alpha(self, t):
@@ -128,10 +139,10 @@ class varPreservingConditionalPath(conditionalPath):
     def dsigma(self, t):
         return -self.alpha(t) * self.dalpha(t) / self.sigma(t)
 
-    def forward(self, x1: torch.Tensor, x0: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, xn: torch.Tensor, xd: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        :param x1: noise (for diffusion/score matching) - B x ... where B=batch_size
-        :param x0: data (for diffusion/score matching) - B x ... where B=batch_size
+        :param xn: noise (for diffusion/score matching) - B x ... where B=batch_size
+        :param xd: data (for diffusion/score matching) - B x ... where B=batch_size
         :param t:t=0 is clean data, t=1 is noise - the standard diffusion
                  convention, matching alpha/dalpha/sigma/dsigma and the papers
                  they're taken from. This is the OPPOSITE of linearConditionalPath
@@ -140,16 +151,16 @@ class varPreservingConditionalPath(conditionalPath):
                  present this path for flow matching
         :return: tensor of size (B,) of inverse log determinant of the Jacobians
         """
-        tx = self._expand(t, x1)
-        xt = self.alpha(tx) * x0 + self.sigma(tx) * x1
+        tx = self._expand(t, xn)
+        xt = self.alpha(tx) * xd + self.sigma(tx) * xn
         if self.target == 'velocity':
-            target = self.dalpha(tx) * x0 + self.dsigma(tx) * x1
+            target = self.dalpha(tx) * xd + self.dsigma(tx) * xn
         elif self.target == 'score':
-            # the score is given by -x1/sigma(t), but we return -x0 as
+            # the score is given by -xn/sigma(t), but we return -xn as
             # the regression target. this is to avoid the loss driven by
             # regions where sigma(t)->0. therefore we match the noise
             # directly and then return the score only at inference time
-            target = - x1
+            target = -xn
         else:
             raise Exception(f'Unknown target type: {self.target}')
 
@@ -157,8 +168,8 @@ class varPreservingConditionalPath(conditionalPath):
 
 
 class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):
-    def __init__(self):
-        super(varPreservingConditionalPathTrigonometric, self).__init__()
+    def __init__(self, target='score'):
+        super(varPreservingConditionalPathTrigonometric, self).__init__(target)
 
     def alpha(self, t):
         return torch.cos(t * torch.pi / 2.)
@@ -174,8 +185,8 @@ class varPreservingConditionalPathTrigonometric(varPreservingConditionalPath):
 
 
 class varPreservingConditionalPathDDPMCosine(varPreservingConditionalPath):
-    def __init__(self, s=0.008):
-        super().__init__()
+    def __init__(self, s=0.008, target='score'):
+        super().__init__(target)
         self.s = s
         self.a = 1. / (1 + self.s) * torch.pi / 2
         self.b = self.s * self.a
@@ -193,8 +204,8 @@ class varPreservingConditionalPathDDPMCosine(varPreservingConditionalPath):
 
 
 class varPreservingConditionalPathLinear(varPreservingConditionalPath):
-    def __init__(self, betaMin=0.1, betaMax=20.0):
-        super(varPreservingConditionalPathLinear, self).__init__()
+    def __init__(self, betaMin=0.1, betaMax=20.0, target='score'):
+        super(varPreservingConditionalPathLinear, self).__init__(target)
         self.betaMin = betaMin
         self.betaMax = betaMax
 
@@ -210,22 +221,19 @@ class varPreservingConditionalPathLinear(varPreservingConditionalPath):
 
 class conditionalScoreMatcher(baseTorchModel):
     def __init__(self, pathGenerator: conditionalPath, scoreField: timeConditionedField):
-        super(conditionalFlowMatcher, self).__init__()
+        super(conditionalScoreMatcher, self).__init__()
         self.pathGenerator = pathGenerator
         self.scoreField = scoreField
 
     def computeLoss(self, data) -> dict:
-        X0 = data.to(self.device)
-        X1 = torch.randn_like(X1, device=self.device)
-        t = torch.rand(X0.shape[0], device=self.device)
+        Xd = data.to(self.device)
+        Xn = torch.randn_like(Xd, device=self.device)
+        t = torch.rand(Xd.shape[0], device=self.device)
 
-        Xt, Ut = self.pathGenerator(X1, X0, t)
+        Xt, Ut = self.pathGenerator(Xn, Xd, t)
         Vt = self.scoreField(Xt, t)
 
         totalLoss = torch.mean(torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1))
 
         return {"totalLoss": totalLoss}
 
-
-if __name__ == "__main__":
-    pass

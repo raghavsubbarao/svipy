@@ -2,7 +2,7 @@ import abc
 import math
 from typing import Tuple  # Optional, Iterable, Union, overload, Tuple, List
 # import numpy as np
-
+import numpy as np
 import torch
 from torchdiffeq import odeint_adjoint
 
@@ -59,14 +59,14 @@ class conditionalPath(torch.nn.Module, abc.ABC):
 class reversedConditionalPath(conditionalPath):
     """
     Presents a wrapped conditionalPath under the opposite time convention -
-    t=0 becomes t=1 and vice versa - without touching the wrapped path's own
-    formulas. Used to adapt paths written in the standard diffusion
-    convention (t=0 data, t=1 noise - e.g. varPreservingConditionalPath and
-    its subclasses) to the flow matching convention and
+    t=0 becomes t=1 and vice versa - without touching the wrapped path's
+    own formulas. Used to adapt paths written in the standard diffusion
+    convention (t=0 data, t=1 noise - e.g. varPreservingConditionalPath
+    and its subclasses) to the flow matching convention and
     continuousNormFlow.generate()/interpolate() assume (t=0 noise, t=1
-    data), while leaving the wrapped path available in its native form for
-    diffusion-specific use (noise schedules, SNR weighting, etc.) that wants
-    the original convention.
+    data), while leaving the wrapped path available in its native form
+    for diffusion-specific use (noise schedules, SNR weighting, etc.)
+    that wants the original convention.
     """
     def __init__(self, path: conditionalPath):
         super(reversedConditionalPath, self).__init__()
@@ -237,3 +237,34 @@ class conditionalScoreMatcher(baseTorchModel):
 
         return {"totalLoss": totalLoss}
 
+
+class diffusionSampler(torch.nn.Module):
+    def __init__(self, scoreField: timeConditionedField, path: varPreservingConditionalPath):
+        self.field = scoreField
+        self.path = path
+
+    def backward(self, xt: torch.Tensor, s: float, t: float, lamda: float) -> torch.Tensor:
+        assert (s < t)
+
+        alphas, alphat = path.alpha(s), path.alpha(t)
+        sigmas, sigmat - path.sigma(s), path.sigma(t)
+
+        g = (sigmas / sigmat) * np.sqrt(1 - alphat * alphat / (alphas * alphas))
+        c = np.sqrt(sigma_s * sigma_s - lamda * lamda * g * g)
+        eta = self.field(xt, t)
+
+        xs = (alpha_s / alpha_t) * (xt + sigma_t * eta) - c * eta + lamda * g * torch.randn_like(xt, device=xt.device)
+        return xs
+
+    def interpolate(self, xt: torch.Tensor, s: float, t: float, lamda: float, nSteps: int) -> torch.Tensor:
+        assert (s < t)
+
+        times = [t - (t - s) * i / nSteps for i in range(nSteps + 1)]
+        xs = xt
+        for ts, tt in zip(times[1:], times[:-1]):
+            xs = self.backward(xs, ts, tt, lamda)
+
+        return xs
+
+    def forward(self, xt: torch.Tensor, s: float, t: float, lamda: float, nSteps: int) -> torch.Tensor:
+        return self.interpolate(xt, s, t, lamda, nSteps)

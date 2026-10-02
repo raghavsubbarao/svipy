@@ -239,10 +239,20 @@ class conditionalScoreMatcher(baseTorchModel):
 
 
 class diffusionSampler(torch.nn.Module):
-    def __init__(self, scoreField: timeConditionedField, path: varPreservingConditionalPath):
+    def __init__(self, scoreField: timeConditionedField, path: varPreservingConditionalPath, tEps: float = 1e-3):
         super(diffusionSampler, self).__init__()
         self.field = scoreField
         self.path = path
+        # _step divides by alpha_t (and, inside g, by sigma_t) - both are
+        # exactly 0 at the t=1/t=0 endpoints by construction (pure noise has
+        # alpha=0, clean data has sigma=0), not just numerically close to it,
+        # so x_t genuinely carries no information to invert there. Clamp the
+        # endpoints actually visited away from 0/1 by tEps so e.g. the
+        # natural-looking forward(x1, 0., 1., ...) call - which mirrors
+        # continuousNormFlow.generate()'s own 0.,1. convention - doesn't
+        # silently blow up on its very first step. Same role minSigma plays
+        # for linearConditionalPath's analogous boundary degeneracy.
+        self.tEps = tEps
 
     def _step(self, xt: torch.Tensor,
               alpha_s: torch.Tensor, alpha_t: torch.Tensor,
@@ -257,6 +267,9 @@ class diffusionSampler(torch.nn.Module):
 
     def interpolate(self, xt: torch.Tensor, s: float, t: float, lamda: float, nSteps: int) -> torch.Tensor:
         assert (s < t)
+        s = max(s, self.tEps)
+        t = min(t, 1. - self.tEps)
+        assert (s < t), f"s={s}, t={t} left no room between them after clamping to tEps={self.tEps}"
 
         # alpha/sigma depend only on the time steps which are known upfront
         # so we compute them in a single vectorized call here rather than

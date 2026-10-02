@@ -240,20 +240,23 @@ class conditionalScoreMatcher(baseTorchModel):
 
 class diffusionSampler(torch.nn.Module):
     def __init__(self, scoreField: timeConditionedField, path: varPreservingConditionalPath):
+        super(diffusionSampler, self).__init__()
         self.field = scoreField
         self.path = path
 
     def backward(self, xt: torch.Tensor, s: float, t: float, lamda: float) -> torch.Tensor:
         assert (s < t)
+        s = torch.tensor(s, device=xt.device)
+        t = torch.tensor(t, device=xt.device)
 
-        alphas, alphat = path.alpha(s), path.alpha(t)
-        sigmas, sigmat - path.sigma(s), path.sigma(t)
+        alphas, alphat = self.path.alpha(s), self.path.alpha(t)
+        sigmas, sigmat = self.path.sigma(s), self.path.sigma(t)
 
-        g = (sigmas / sigmat) * np.sqrt(1 - alphat * alphat / (alphas * alphas))
-        c = np.sqrt(sigma_s * sigma_s - lamda * lamda * g * g)
+        g = (sigmas / sigmat) * torch.sqrt(1 - alphat * alphat / (alphas * alphas))
+        c = torch.sqrt(sigmas * sigmas - lamda * lamda * g * g)
         eta = self.field(xt, t)
 
-        xs = (alpha_s / alpha_t) * (xt + sigma_t * eta) - c * eta + lamda * g * torch.randn_like(xt, device=xt.device)
+        xs = (alphas / alphat) * (xt + sigmat * eta) - c * eta + lamda * g * torch.randn_like(xt, device=xt.device)
         return xs
 
     def interpolate(self, xt: torch.Tensor, s: float, t: float, lamda: float, nSteps: int) -> torch.Tensor:

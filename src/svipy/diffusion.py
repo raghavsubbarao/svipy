@@ -244,28 +244,45 @@ class diffusionSampler(torch.nn.Module):
         self.field = scoreField
         self.path = path
 
-    def backward(self, xt: torch.Tensor, s: float, t: float, lamda: float) -> torch.Tensor:
-        assert (s < t)
-        s = torch.tensor(s, device=xt.device)
-        t = torch.tensor(t, device=xt.device)
-
-        alphas, alphat = self.path.alpha(s), self.path.alpha(t)
-        sigmas, sigmat = self.path.sigma(s), self.path.sigma(t)
-
+    def _step(self, xt: torch.Tensor, alphas: torch.Tensor, alphat: torch.Tensor,
+              sigmas: torch.Tensor, sigmat: torch.Tensor, t: torch.Tensor, lamda: float) -> torch.Tensor:
+        """
+        The one-step reverse update, taking alpha/sigma at both endpoints
+        already computed. Shared by backward() (a single ad-hoc step) and
+        interpolate() (many steps against a precomputed schedule), so the
+        formula itself only lives in one place.
+        """
         g = (sigmas / sigmat) * torch.sqrt(1 - alphat * alphat / (alphas * alphas))
         c = torch.sqrt(sigmas * sigmas - lamda * lamda * g * g)
         eta = self.field(xt, t)
 
-        xs = (alphas / alphat) * (xt + sigmat * eta) - c * eta + lamda * g * torch.randn_like(xt, device=xt.device)
-        return xs
+        return (alphas / alphat) * (xt + sigmat * eta) - c * eta + lamda * g * torch.randn_like(xt, device=xt.device)
+
+    def backward(self, xt: torch.Tensor, s: float, t: float, lamda: float) -> torch.Tensor:
+        assert (s < t)
+        s = torch.as_tensor(s, device=xt.device, dtype=xt.dtype)
+        t = torch.as_tensor(t, device=xt.device, dtype=xt.dtype)
+
+        alphas, alphat = self.path.alpha(s), self.path.alpha(t)
+        sigmas, sigmat = self.path.sigma(s), self.path.sigma(t)
+
+        return self._step(xt, alphas, alphat, sigmas, sigmat, t, lamda)
 
     def interpolate(self, xt: torch.Tensor, s: float, t: float, lamda: float, nSteps: int) -> torch.Tensor:
         assert (s < t)
 
-        times = [t - (t - s) * i / nSteps for i in range(nSteps + 1)]
+        # alpha/sigma depend only on the (fixed, known up front) time
+        # schedule, not on xt - compute them for every visited time in one
+        # vectorized call each, rather than recomputing per step (which also
+        # recomputes each interior time's alpha/sigma twice: once as the
+        # "t" of one step and again as the "s" of the next).
+        times = torch.linspace(t, s, nSteps + 1, device=xt.device, dtype=xt.dtype)
+        alphaAll = self.path.alpha(times)
+        sigmaAll = self.path.sigma(times)
+
         xs = xt
-        for ts, tt in zip(times[1:], times[:-1]):
-            xs = self.backward(xs, ts, tt, lamda)
+        for i in range(nSteps):
+            xs = self._step(xs, alphaAll[i + 1], alphaAll[i], sigmaAll[i + 1], sigmaAll[i], times[i], lamda)
 
         return xs
 

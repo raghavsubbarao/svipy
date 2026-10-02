@@ -33,10 +33,13 @@ from svipy.diffusion import (
     conditionalPath,
     reversedConditionalPath,
     linearConditionalPath,
+    conditionalFlowMatcher,
     varPreservingConditionalPath,
     varPreservingConditionalPathTrigonometric,
     varPreservingConditionalPathDDPMCosine,
     varPreservingConditionalPathLinear,
+    conditionalScoreMatcher,
+    diffusionSampler
 )
 
 from svipy.rbm import restrictedBoltzmannMachine

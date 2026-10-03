@@ -630,7 +630,7 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
 
         self.downs = torch.nn.ModuleList([torch.nn.Conv2d(dims[i], dims[i + 1], kernelSize, padding='same')
                                           for i in range(nStages)])
-        self.downsamples = torch.nn.ModuleList([torch.nn.Conv2d(dims[i], dims[i + 1], 4, stride=2, padding=1)
+        self.downsamples = torch.nn.ModuleList([torch.nn.Conv2d(dims[i + 1], dims[i + 1], 4, stride=2, padding=1)
                                                 for i in range(nStages)])
 
         self.bottleneck = torch.nn.Conv2d(dims[-1], dims[-1], kernelSize, padding='same')

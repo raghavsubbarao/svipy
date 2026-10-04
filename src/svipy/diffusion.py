@@ -260,8 +260,8 @@ class diffusionSampler(torch.nn.Module):
               sigma_s: torch.Tensor, sigma_t: torch.Tensor,
               t: torch.Tensor, lamda: float) -> torch.Tensor:
 
-        g = (sigma_s / sigma_t) * torch.sqrt(1 - alpha_t * alpha_t / (alpha_s * alpha_s))
-        c = torch.sqrt(sigma_s * sigma_s - lamda * lamda * g * g)
+        g = (sigma_s / sigma_t) * torch.sqrt(torch.clamp(1 - alpha_t * alpha_t / (alpha_s * alpha_s), min=0.))
+        c = torch.sqrt(torch.clamp(sigma_s * sigma_s - lamda * lamda * g * g, min=0.))
         eta = self.field(xt, t)
 
         return (alpha_s / alpha_t) * (xt + sigma_t * eta) - c * eta + lamda * g * torch.randn_like(xt, device=xt.device)

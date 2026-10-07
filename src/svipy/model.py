@@ -32,13 +32,13 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         """
         pass
 
-    def trainStep(self, data, optimizer, gradClipNorm=None):
+    def trainStep(self, data, optimizer, gradientClippingNorm=None):
         losses = self.computeLoss(data)
 
         optimizer.zero_grad()
         losses['totalLoss'].backward()
-        if gradClipNorm is not None:
-            torch.nn.utils.clip_grad_norm_(self.parameters(), gradClipNorm)
+        if gradientClippingNorm is not None:
+            torch.nn.utils.clip_grad_norm_(self.parameters(), gradientClippingNorm)
         optimizer.step()
 
         return self.trainTrackers.update({name: loss.detach() for name, loss in losses.items()})
@@ -51,7 +51,7 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                   reportIters=100, scheduler=None,
                   checkpointPath=None, checkPointName=None,
                   validDataLoader=None, earlyStopper=None,
-                  annealers=None, gradClipNorm=None):
+                  annealers=None, gradientClippingNorm=None):
 
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
@@ -76,7 +76,7 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
 
             trainTotals, nTrainBatches = {}, 0
             for batch, data in enumerate(trainDataLoader):
-                metrics = self.trainStep(data, optimizer, gradClipNorm=gradClipNorm)
+                metrics = self.trainStep(data, optimizer, gradientClippingNorm)
                 for name, value in metrics.items():
                     trainTotals[name] = trainTotals.get(name, 0.0) + value.item()
                 nTrainBatches += 1

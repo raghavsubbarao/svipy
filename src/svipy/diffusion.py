@@ -260,15 +260,6 @@ class diffusionSampler(torch.nn.Module):
               sigma_s: torch.Tensor, sigma_t: torch.Tensor,
               t: torch.Tensor, lamda: float) -> torch.Tensor:
 
-        # Both radicands are provably >= 0 in exact arithmetic (s < t implies
-        # alpha_t/alpha_s <= 1, and the one-parameter family this is built
-        # from guarantees g <= sigma_s - see the derivation history), but
-        # floating point rounding alone can push either slightly negative in
-        # practice: sqrt() of a negative number silently yields nan rather
-        # than erroring, which - inside a many-step loop - turns one bad step
-        # into every subsequent step being nan too. Clamping is defensive
-        # against rounding only, not a sign anything here is mathematically
-        # wrong.
         g = (sigma_s / sigma_t) * torch.sqrt(torch.clamp(1 - alpha_t * alpha_t / (alpha_s * alpha_s), min=0.))
         c = torch.sqrt(torch.clamp(sigma_s * sigma_s - lamda * lamda * g * g, min=0.))
         eta = self.field(xt, t)

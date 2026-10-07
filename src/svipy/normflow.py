@@ -630,9 +630,6 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
 
         self.downs = torch.nn.ModuleList([torch.nn.Conv2d(dims[i], dims[i + 1], kernelSize, padding='same')
                                           for i in range(nStages)])
-        # downsample[i] runs on down[i]'s output (dims[i+1] channels), not on
-        # down[i]'s input (dims[i]) - it only changes spatial resolution, so
-        # in and out channel counts are both dims[i+1].
         self.downsamples = torch.nn.ModuleList([torch.nn.Conv2d(dims[i + 1], dims[i + 1], 4, stride=2, padding=1)
                                                 for i in range(nStages)])
 
@@ -743,11 +740,12 @@ class continuousNormFlow(normFlowModule):
         self.direction = direction
         self.odeMethod = odeMethod
         self.odeOptions = odeOptions
+
         # kinetic energy of the last integration, ∫||f(z,t)||^2 dt per example -
         # a diagnostic/regularization quantity (Finlay et al. 2020), refreshed
         # on every _integrate() call that tracks it. Kept as a side-channel
         # attribute rather than a return value so this class still satisfies
-        # normFlowModule's shared (transformed, logDet) contract like every
+        # normFlowModule's shared (transformed, logDet) signature like every
         # other flow type; anyone holding a continuousNormFlow instance -
         # whether it's wrapped as a prior or a posterior - can read it after
         # calling forward/generate/normalize. None after a call that opts
@@ -757,25 +755,22 @@ class continuousNormFlow(normFlowModule):
 
     def _integrate(self, y, ts, useAdjoint=True, trackKineticEnergy=True):
         """
-        useAdjoint picks odeint_adjoint's O(1)-memory continuous adjoint
+        useAdjoint=True uses odeint_adjoint's O(1)-memory continuous adjoint
         method vs plain odeint. Only relevant when something outside this
-        call needs to backprop through the integration into
-        self.dynamics.parameters() (e.g. generate()/normalize() used inside
-        a VAE's training loss) - pass False for pure sampling/inference use
-        (e.g. interpolate() called under torch.no_grad()), where plain
-        odeint avoids the adjoint bookkeeping for no cost.
+        call needs to backprop thru the integration into self.dynamics.parameters()
+        (e.g. generate()/normalize() used inside a VAE's training loss)
+        - pass False for pure sampling/inference use (e.g. interpolate() called
+        under torch.no_grad()), where odeint avoids the adjoint bookkeeping cost.
 
-        trackKineticEnergy adds a third augmented ODE state (see
-        self.kineticEnergy above) that the solver has to carry and step
-        alongside z and the log-det - real, if modest, extra cost for
-        callers that never read it, so interpolate() opts out.
+        trackKineticEnergy adds a third augmented ODE state (see self.kineticEnergy
+        above) that the solver has to carry and step alongside z and the log-det -
+        a cost for callers that never read it, so interpolate() opts out.
 
-        Neither flag affects the enable_grad/requires_grad_ dance below -
-        that's required by hutchinsonTrace's internal torch.autograd.grad
-        call, which needs z to require grad at the point dz_dt is computed
-        regardless of solver choice or of whether the caller wants
-        gradients afterward. Dropping it breaks the log-det estimate
-        outright, even with useAdjoint=False.
+        Neither flag affects the enable_grad/requires_grad_ below - that's required
+        by hutchinsonTrace's internal torch.autograd.grad call, which needs z to
+        require grad at the point dz_dt is computed regardless of solver choice or
+        whether the caller wants gradients afterward. Dropping it breaks the log-det
+        estimate outright, even with useAdjoint=False.
         """
         log_p = torch.zeros(y.shape[0], device=y.device)  # initial log det = 0
         state = (y, log_p, torch.zeros(y.shape[0], device=y.device)) if trackKineticEnergy else (y, log_p)

@@ -1,11 +1,10 @@
-import abc
 import math
-from typing import Optional, Iterable, Union, overload, Tuple
+from typing import Tuple
 
 import torch
 
 from svipy.model import baseTorchModel
-from svipy.normflow import normFlowPrior, normFlowPosterior
+from svipy.svi.normflow import normFlowPrior, normFlowPosterior
 
 class vaeEncoder:
     def __init__(self, nn: torch.nn.Module) -> None:

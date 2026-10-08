@@ -324,6 +324,7 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         if earlyStopper is not None:
             earlyStopper.restore(self)
 
+
 class reshape(torch.nn.Module):
     def __init__(self, shape):
         super(reshape, self).__init__()

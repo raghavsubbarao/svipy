@@ -8,7 +8,7 @@ import torch
 from torchdiffeq import odeint_adjoint, odeint
 
 from svipy.model import baseTorchModel
-
+from svipy.recurrent.attention import multiHeadAttentionTorchSDP
 
 #################################
 #           Norm Flow           #
@@ -621,7 +621,8 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
     stage halves it; the up path needs to land back on an integer size).
     """
     def __init__(self, inDims: int, channels: List[int], kernelSize: int = 3,
-                 t_dim: int = 1, activation: Optional[torch.nn.Module] = None):
+                 t_dim: int = 1, activation: Optional[torch.nn.Module] = None,
+                 addResidual: bool = False, addAttention: bool = False):
         super(scalarConditionedNetworkUNet, self).__init__()
         self.activation = activation if activation is not None else torch.nn.ELU()
 
@@ -633,7 +634,19 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
         self.downsamples = torch.nn.ModuleList([torch.nn.Conv2d(dims[i + 1], dims[i + 1], 4, stride=2, padding=1)
                                                 for i in range(nStages)])
 
+        if addResidual:
+            self.residuals = torch.nn.ModuleList([torch.nn.Conv2d(dims[i + 1], dims[i + 1], kernelSize, padding='same')
+                                                  for i in range(nStages)])
+        else:
+            self.residuals = None
+
         self.bottleneck = torch.nn.Conv2d(dims[-1], dims[-1], kernelSize, padding='same')
+
+        if addAttention:
+            self.sha = multiHeadAttentionTorchSDP(dims[nStages + 1], dims[nStages + 1], 4,
+                                                  contextLength=0, bias=True, is_causal=False)
+        else:
+            self.sha = None
 
         # up stage j undoes down stage (nStages-1-j): upsamples to dims[nStages-j]
         # (matching the skip from that stage for concatenation), then the fuse conv
@@ -661,11 +674,18 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
         i = 0
         for down, downsample in zip(self.downs, self.downsamples):
             h = self.activation(embedding.combine(i, h, down, t_embed))
+            if self.residuals:
+                h = h + self.activation(embedding.combine(i, h, self.residuals[i], t_embed))
             skips.append(h)
             h = downsample(h)
             i = i + 1
 
         h = self.activation(embedding.combine(i, h, self.bottleneck, t_embed))
+        if self.sha:
+            dims = h.shape
+            tokens = h.flatten(2).transpose(1, 2)
+            tokens = tokens + self.sha(tokens)
+            h = tokens.transpose(1, 2).reshape(dims)
         i = i + 1
 
         for j, (upsample, up) in enumerate(zip(self.upsamples, self.ups)):

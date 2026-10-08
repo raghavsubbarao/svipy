@@ -7,7 +7,7 @@ class singleSelfAttention(torch.nn.Module):
     Simple single head self-attention class
     """
 
-    def __init__(self, n_in: int, n_out: int, drop_out: float = 0., bias: bool = False):
+    def __init__(self, n_in: int, n_out: int, dropout: float = 0., bias: bool = False):
         super(singleSelfAttention, self).__init__()
 
         self.n_in = n_in
@@ -16,8 +16,8 @@ class singleSelfAttention(torch.nn.Module):
         self.Wk = torch.nn.Linear(n_in, n_out, bias=bias)
         self.Wv = torch.nn.Linear(n_in, n_out, bias=bias)
 
-        if drop_out > 0.:
-            self.dropout = torch.nn.Dropout(drop_out)
+        if dropout > 0.:
+            self.dropout = torch.nn.Dropout(dropout)
         else:
             self.dropout = None
 

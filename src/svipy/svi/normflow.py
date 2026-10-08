@@ -643,10 +643,21 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
         self.bottleneck = torch.nn.Conv2d(dims[-1], dims[-1], kernelSize, padding='same')
 
         if addAttention:
-            self.sha = multiHeadAttentionTorchSDP(dims[nStages + 1], dims[nStages + 1], 4,
-                                                  contextLength=0, bias=True, is_causal=False)
+            # dims has nStages+1 entries (0..nStages) - the bottleneck width is
+            # dims[nStages] == dims[-1], same value self.bottleneck itself uses.
+            self.sha = multiHeadAttentionTorchSDP(dims[nStages], dims[nStages], 4,
+                                                  bias=True, is_causal=False)
+            # pre-norm before the attention residual, standard transformer-block
+            # practice - without it the un-normalized bottleneck activations
+            # (already FiLM-scaled, arbitrary magnitude) feed straight into the
+            # softmax, which can make attention poorly calibrated and adds
+            # another unnormalized residual stack on top of the conv path -
+            # exactly the kind of thing that destabilized training before
+            # gradient clipping was added.
+            self.attnNorm = torch.nn.LayerNorm(dims[nStages])
         else:
             self.sha = None
+            self.attnNorm = None
 
         # up stage j undoes down stage (nStages-1-j): upsamples to dims[nStages-j]
         # (matching the skip from that stage for concatenation), then the fuse conv
@@ -658,8 +669,18 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
                                                         kernelSize, padding='same')
                                         for j in range(nStages)])
 
-        # built to mirror the construction loops above exactly
-        downWidths = [dims[i + 1] for i in range(nStages)]
+        # built to mirror the construction loops above exactly - one entry per
+        # combine() call in forward(). With addResidual, each down stage makes
+        # two combine() calls (down[i] then residuals[i]), each with its own
+        # independently-learned (gamma, beta) - reusing one slot for both
+        # would force the channel-expanding conv and the residual-refinement
+        # conv to share the exact same learned time-conditioned response,
+        # which defeats the point of FiLM having a separate slot per layer.
+        downWidths = []
+        for i in range(nStages):
+            downWidths.append(dims[i + 1])
+            if addResidual:
+                downWidths.append(dims[i + 1])
         bottleneckWidth = [dims[-1]]
         upWidths = [dims[nStages - 1 - j] for j in range(nStages)]
         self.__filmDims = downWidths + bottleneckWidth + upWidths
@@ -672,19 +693,20 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
 
         h = z
         i = 0
-        for down, downsample in zip(self.downs, self.downsamples):
+        for stageIdx, (down, downsample) in enumerate(zip(self.downs, self.downsamples)):
             h = self.activation(embedding.combine(i, h, down, t_embed))
+            i = i + 1
             if self.residuals:
-                h = h + self.activation(embedding.combine(i, h, self.residuals[i], t_embed))
+                h = h + self.activation(embedding.combine(i, h, self.residuals[stageIdx], t_embed))
+                i = i + 1
             skips.append(h)
             h = downsample(h)
-            i = i + 1
 
         h = self.activation(embedding.combine(i, h, self.bottleneck, t_embed))
         if self.sha:
             dims = h.shape
             tokens = h.flatten(2).transpose(1, 2)
-            tokens = tokens + self.sha(tokens)
+            tokens = tokens + self.sha(self.attnNorm(tokens))
             h = tokens.transpose(1, 2).reshape(dims)
         i = i + 1
 

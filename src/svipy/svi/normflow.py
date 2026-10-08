@@ -669,13 +669,7 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
                                                         kernelSize, padding='same')
                                         for j in range(nStages)])
 
-        # built to mirror the construction loops above exactly - one entry per
-        # combine() call in forward(). With addResidual, each down stage makes
-        # two combine() calls (down[i] then residuals[i]), each with its own
-        # independently-learned (gamma, beta) - reusing one slot for both
-        # would force the channel-expanding conv and the residual-refinement
-        # conv to share the exact same learned time-conditioned response,
-        # which defeats the point of FiLM having a separate slot per layer.
+        # built to mirror the construction loops above exactly
         downWidths = []
         for i in range(nStages):
             downWidths.append(dims[i + 1])

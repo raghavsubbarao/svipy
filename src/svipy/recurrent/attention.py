@@ -7,7 +7,7 @@ class singleSelfAttention(torch.nn.Module):
     Simple single head self-attention class
     """
 
-    def __init__(self, n_in: int, n_out: int, drop_out: float = 0., bias: bool = False):
+    def __init__(self, n_in: int, n_out: int, dropout: float = 0., bias: bool = False):
         super(singleSelfAttention, self).__init__()
 
         self.n_in = n_in
@@ -16,8 +16,8 @@ class singleSelfAttention(torch.nn.Module):
         self.Wk = torch.nn.Linear(n_in, n_out, bias=bias)
         self.Wv = torch.nn.Linear(n_in, n_out, bias=bias)
 
-        if drop_out > 0.:
-            self.dropout = torch.nn.Dropout(drop_out)
+        if dropout > 0.:
+            self.dropout = torch.nn.Dropout(dropout)
         else:
             self.dropout = None
 
@@ -40,7 +40,7 @@ class singleCausalAttention(torch.nn.Module):
     Simple single head self-attention class with causal mask
     """
 
-    def __init__(self, n_in: int, n_out: int, contextLength: int, drop_out: float = 0., bias: bool = False):
+    def __init__(self, n_in: int, n_out: int, contextLength: int, dropout: float = 0., bias: bool = False):
         super(singleCausalAttention, self).__init__()
 
         self.n_in = n_in
@@ -49,8 +49,8 @@ class singleCausalAttention(torch.nn.Module):
         self.Wk = torch.nn.Linear(n_in, n_out, bias=bias)
         self.Wv = torch.nn.Linear(n_in, n_out, bias=bias)
 
-        if drop_out > 0.:
-            self.dropout = torch.nn.Dropout(drop_out)
+        if dropout > 0.:
+            self.dropout = torch.nn.Dropout(dropout)
         else:
             self.dropout = None
 
@@ -81,8 +81,8 @@ class singleCausalAttention(torch.nn.Module):
 
 class multiHeadAttention(torch.nn.Module):
 
-    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None, drop_out: float = 0.,
-                 bias: bool = False, is_causal: bool = True):
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None,
+                 dropout: float = 0., bias: bool = False, is_causal: bool = True):
         super(multiHeadAttention, self).__init__()
 
         # output dimension must be a multiple of n_heads
@@ -99,8 +99,8 @@ class multiHeadAttention(torch.nn.Module):
         self.Wqkv = torch.nn.Linear(n_in, 3 * n_out, bias=bias)
         self.ff = torch.nn.Linear(n_out, n_out)  # linear layer to combine outputs
 
-        if drop_out > 0.:
-            self.dropout = torch.nn.Dropout(drop_out)
+        if dropout > 0.:
+            self.dropout = torch.nn.Dropout(dropout)
         else:
             self.dropout = None
 
@@ -135,8 +135,8 @@ class multiHeadAttention(torch.nn.Module):
 
 class multiHeadAttentionTorch(torch.nn.Module):
 
-    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None, drop_out: float = 0.,
-                 bias: bool = False, is_causal: bool = True, needWts: bool = True):
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None,
+                 dropout: float = 0., bias: bool = False, is_causal: bool = True, needWts: bool = True):
         super(multiHeadAttentionTorch, self).__init__()
 
         # output dimension must be a multiple of n_heads
@@ -151,7 +151,7 @@ class multiHeadAttentionTorch(torch.nn.Module):
         self.is_causal = is_causal
         self.needWeights = needWts
 
-        self.mha = torch.nn.MultiheadAttention(embed_dim=n_out, num_heads=nHeads, dropout=drop_out,
+        self.mha = torch.nn.MultiheadAttention(embed_dim=n_out, num_heads=nHeads, dropout=dropout,
                                                bias=bias, add_bias_kv=bias, batch_first=True)
 
         self.ff = torch.nn.Linear(n_out, n_out)  # linear layer to combine outputs
@@ -179,10 +179,10 @@ class multiHeadAttentionTorchSDP(torch.nn.Module):
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
-        # contextLength isn't actually used anywhere below - scaled_dot_product_attention's
-        # is_causal builds its causal mask from the real runtime sequence length, not a
-        # pre-sized buffer, so unlike the other two classes there's no mask to size here
-        # even in the causal case. Kept only for constructor-signature symmetry with them.
+
+        # contextLength is not really required here since
+        # torch builds the mask within the SDP call.
+        # retained here for symmetry with other classes.
         assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
@@ -225,32 +225,32 @@ if __name__ == "__main__":
     context_len = 1024
     embed_dim = 768
     n_heads = 12
-    dropout = 0.0
-    bias = False
+    drop_out = 0.0
+    hasBias = False
 
     embeddings = torch.randn((batch_size, context_len, embed_dim), device=device)
 
     mha = multiHeadAttention(embed_dim, embed_dim, n_heads,
-                             context_len, dropout, bias, True).to(device)
+                             context_len, drop_out, hasBias, True).to(device)
     out = mha(embeddings)
     print(out.shape)
 
     mha = multiHeadAttention(embed_dim, embed_dim, n_heads,
-                             context_len, dropout, bias, False).to(device)
+                             context_len, drop_out, hasBias, False).to(device)
     out = mha(embeddings)
     print(out.shape)
 
     mha = multiHeadAttentionTorch(embed_dim, embed_dim, n_heads,
-                                  context_len, dropout, bias, False).to(device)
+                                  context_len, drop_out, hasBias, False).to(device)
     out = mha(embeddings)
     print(out.shape)
 
     mha = multiHeadAttentionTorch(embed_dim, embed_dim, n_heads,
-                                  context_len, dropout, bias, True).to(device)
+                                  context_len, drop_out, hasBias, True).to(device)
     out = mha(embeddings)
     print(out.shape)
 
     mha = multiHeadAttentionTorchSDP(embed_dim, embed_dim, n_heads,
-                                     context_len, dropout, bias).to(device)
+                                     context_len, drop_out, hasBias).to(device)
     out = mha(embeddings)
     print(out.shape)

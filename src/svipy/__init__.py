@@ -1,6 +1,6 @@
 from svipy.model import baseTorchModel, baseLossTracker, lossTrackerCollection, earlyStopping, paramAnnealer, reshape
 
-from svipy.vae import (
+from svipy.svi.vae import (
     vaeEncoder,
     vaeDecoder,
     variationalAutoencoder,
@@ -9,7 +9,7 @@ from svipy.vae import (
     autoencodingVariationalAutoencoder,
 )
 
-from svipy.normflow import (
+from svipy.svi.normflow import (
     normFlowModule,
     normFlowSequential,
     nvpBatchNorm2d,
@@ -29,7 +29,7 @@ from svipy.normflow import (
     continuousNormFlow,
 )
 
-from svipy.diffusion import (
+from svipy.svi.diffusion import (
     conditionalPath,
     reversedConditionalPath,
     linearConditionalPath,

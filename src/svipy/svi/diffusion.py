@@ -2,12 +2,10 @@ import abc
 import math
 from typing import Tuple  # Optional, Iterable, Union, overload, Tuple, List
 # import numpy as np
-import numpy as np
 import torch
-from torchdiffeq import odeint_adjoint
 
-from svipy.model import baseTorchModel, baseLossTracker
-from svipy.normflow import timeConditionedField
+from svipy.model import baseTorchModel
+from svipy.svi.normflow import timeConditionedField
 
 
 #################################

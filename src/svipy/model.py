@@ -2,7 +2,7 @@ import abc
 import copy
 
 import torch
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 from typing import Optional, List
 
 
@@ -166,7 +166,7 @@ class lossTrackerCollection:
         names = []
         for collection in histories.values():
             for name in collection.trackers:
-                if name not in names and name in losses:
+                if name not in names and (losses is None or name in losses):
                     names.append(name)
 
         fig, axesList = plt.subplots(len(names), 1, figsize=figsize or (6, 3 * len(names)), squeeze=False)

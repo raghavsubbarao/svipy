@@ -184,7 +184,7 @@ class variationalAutoencoder(baseTorchModel):
         totalLoss = reconLoss + self.beta * klLoss + self.kineticEnergyWeight * kineticReg
 
         return {"totalLoss": totalLoss, "reconLoss": reconLoss, "klLoss": klLoss,
-                "fldj": torch.mean(fldj), "kineticReg": kineticReg}
+                "fldj": torch.mean(-fldj), "kineticReg": kineticReg}
 
 
 #################################

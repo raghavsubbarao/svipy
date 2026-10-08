@@ -643,8 +643,9 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
         self.bottleneck = torch.nn.Conv2d(dims[-1], dims[-1], kernelSize, padding='same')
 
         if addAttention:
-            self.sha = multiHeadAttentionTorchSDP(dims[nStages + 1], dims[nStages + 1], 4,
-                                                  contextLength=0, bias=True, is_causal=False)
+            self.sha = multiHeadAttentionTorchSDP(dims[nStages], dims[nStages], 4,
+                                                  bias=True, is_causal=False)
+            self.attNorm = torch.nn.LayerNorm(dims[nStages])
         else:
             self.sha = None
 
@@ -659,7 +660,10 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
                                         for j in range(nStages)])
 
         # built to mirror the construction loops above exactly
-        downWidths = [dims[i + 1] for i in range(nStages)]
+        for i in range(nStages):
+            downWidths.append(dims[i + 1])
+            if addResidual:
+                downWidths.append(dims[i + 1])
         bottleneckWidth = [dims[-1]]
         upWidths = [dims[nStages - 1 - j] for j in range(nStages)]
         self.__filmDims = downWidths + bottleneckWidth + upWidths
@@ -672,19 +676,20 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
 
         h = z
         i = 0
-        for down, downsample in zip(self.downs, self.downsamples):
+        for j, (down, downsample) in enumerate(zip(self.downs, self.downsamples)):
             h = self.activation(embedding.combine(i, h, down, t_embed))
+            i = i + 1
             if self.residuals:
-                h = h + self.activation(embedding.combine(i, h, self.residuals[i], t_embed))
+                h = h + self.activation(embedding.combine(i, h, self.residuals[j], t_embed))
+                i = i + 1
             skips.append(h)
             h = downsample(h)
-            i = i + 1
 
         h = self.activation(embedding.combine(i, h, self.bottleneck, t_embed))
         if self.sha:
             dims = h.shape
             tokens = h.flatten(2).transpose(1, 2)
-            tokens = tokens + self.sha(tokens)
+            tokens = tokens + self.sha(self.attNorm(tokens))
             h = tokens.transpose(1, 2).reshape(dims)
         i = i + 1
 

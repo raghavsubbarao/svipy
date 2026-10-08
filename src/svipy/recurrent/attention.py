@@ -81,12 +81,13 @@ class singleCausalAttention(torch.nn.Module):
 
 class multiHeadAttention(torch.nn.Module):
 
-    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: int, drop_out: float = 0.,
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None, drop_out: float = 0.,
                  bias: bool = False, is_causal: bool = True):
         super(multiHeadAttention, self).__init__()
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
+        assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
         self.n_out = n_out
@@ -134,12 +135,13 @@ class multiHeadAttention(torch.nn.Module):
 
 class multiHeadAttentionTorch(torch.nn.Module):
 
-    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: int, drop_out: float = 0.,
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None, drop_out: float = 0.,
                  bias: bool = False, is_causal: bool = True, needWts: bool = True):
         super(multiHeadAttentionTorch, self).__init__()
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
+        assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
         self.n_out = n_out
@@ -171,11 +173,12 @@ class multiHeadAttentionTorch(torch.nn.Module):
 
 class multiHeadAttentionTorchSDP(torch.nn.Module):
 
-    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: int, dropout: float = 0., bias: bool = False, is_causal: bool = True):
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: Optional[int] = None, dropout: float = 0., bias: bool = False, is_causal: bool = True):
         super(multiHeadAttentionTorchSDP, self).__init__()
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
+        assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
         self.n_out = n_out

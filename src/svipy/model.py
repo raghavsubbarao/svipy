@@ -2,128 +2,8 @@ import abc
 import copy
 
 import torch
-
-
-class baseTorchModel(torch.nn.Module, abc.ABC):
-    def __init__(self, *args, **kwargs):
-        super(baseTorchModel, self).__init__(*args, **kwargs)
-
-        # todo: do we need per-batch tracking? remove if not required
-        self.trainTrackers = lossTrackerCollection()  # per batch
-        self.epochTrackers = {'train': lossTrackerCollection(),
-                              'valid': lossTrackerCollection()}  # per epoch, for loss-vs-epoch charts
-
-    @property
-    def device(self):
-        return next(self.parameters()).device
-
-    @property
-    def metrics(self):
-        return self.trainTrackers.metrics
-
-    @abc.abstractmethod
-    def computeLoss(self, data) -> dict:
-        """
-        Compute the losses for a single batch of data.
-        :param data: a batch as produced by the DataLoader
-        :return: dict of named scalar-tensor losses. Must include a
-                 'totalLoss' key - the value backpropagated during
-                 training and monitored for checkpointing / early stopping.
-        """
-        pass
-
-    def trainStep(self, data, optimizer, gradientClippingNorm=None):
-        losses = self.computeLoss(data)
-
-        optimizer.zero_grad()
-        losses['totalLoss'].backward()
-        if gradientClippingNorm is not None:
-            torch.nn.utils.clip_grad_norm_(self.parameters(), gradientClippingNorm)
-        optimizer.step()
-
-        return self.trainTrackers.update({name: loss.detach() for name, loss in losses.items()})
-
-    @torch.no_grad()
-    def validStep(self, data):
-        return self.computeLoss(data)
-
-    def trainLoop(self, trainDataLoader, optimizer, epochs,
-                  reportIters=100, scheduler=None,
-                  checkpointPath=None, checkPointName=None,
-                  validDataLoader=None, earlyStopper=None,
-                  annealers=None, gradientClippingNorm=None):
-
-        if earlyStopper is not None and validDataLoader is None:
-            raise ValueError("earlyStopping requires a validDataLoader to monitor")
-
-        annealers = annealers or []
-        trainSize = len(trainDataLoader.dataset)
-
-        self.trainTrackers.clear()
-        self.epochTrackers['train'].clear()
-        self.epochTrackers['valid'].clear()
-
-        for t in range(epochs):
-            print(f"Epoch {t + 1}\n-------------------------------")
-
-            for annealer in annealers:
-                current = annealer.step(t, self)
-                print(f"{annealer.param}: {current:>7f}")
-
-            # Set the model to training mode - do here
-            # in case theres a validation dataset
-            self.train()
-
-            trainTotals, nTrainBatches = {}, 0
-            for batch, data in enumerate(trainDataLoader):
-                metrics = self.trainStep(data, optimizer, gradientClippingNorm)
-                for name, value in metrics.items():
-                    trainTotals[name] = trainTotals.get(name, 0.0) + value.item()
-                nTrainBatches += 1
-
-                if (batch + 1) % reportIters == 0:
-                    print(' '.join([f'{l}: {metrics[l]:>7f}' for l in metrics]) +
-                          f'[{(batch + 1) * trainDataLoader.batch_size:>5d}/{trainSize:>5d}]')
-
-            self.epochTrackers['train'].update({name: total / nTrainBatches for name, total in trainTotals.items()})
-
-            validationLoss = None
-            if validDataLoader:
-                self.eval()
-
-                totals, nBatches = {}, 0
-                for data in validDataLoader:
-                    losses = self.validStep(data)
-                    for name, loss in losses.items():
-                        totals[name] = totals.get(name, 0.0) + loss.item()
-                    nBatches += 1
-
-                validMetrics = {name: total / nBatches for name, total in totals.items()}
-                validationLoss = validMetrics['totalLoss']
-                self.epochTrackers['valid'].update(validMetrics)
-
-                print(f"Validation Error: {validationLoss:>7f}")
-
-            if checkpointPath:
-                assert(checkPointName is not None)
-                modelDict = {'epoch': t, 'model_state_dict': self.state_dict(),
-                             'optimizer_state_dict': optimizer.state_dict()}
-                if validationLoss is not None:
-                    modelDict['validation_loss'] = validationLoss
-                torch.save(modelDict, checkpointPath + f'{checkPointName}-{t}.model')
-
-            if scheduler:
-                scheduler.step()
-
-            stillAnnealing = any(not annealer.isDone(t) for annealer in annealers)
-            if earlyStopper is not None and not stillAnnealing:
-                if earlyStopper.step(validationLoss, t, self):
-                    print(f"Early stopping: no improvement in {earlyStopper.patience} epochs "
-                          f"(best={earlyStopper.best:>7f} @ epoch {earlyStopper.bestEpoch + 1})")
-                    break
-
-        if earlyStopper is not None:
-            earlyStopper.restore(self)
+from tqdm.auto import tqdm
+from typing import Optional, List
 
 
 class earlyStopping:
@@ -269,13 +149,15 @@ class lossTrackerCollection:
                 axes[name].plot(tracker.losses, **lineKwargs)
 
     @staticmethod
-    def plotComparison(histories: dict, figsize=None):
+    def plotComparison(histories: dict, figsize=None, losses: Optional[List[str]] = None):
         """
         One subplot per metric name (union across all given collections), so
         metrics on very different scales (e.g. totalLoss vs klLoss) each get
         their own y-axis instead of collapsing onto a shared one.
         :param histories: named collections to overlay, e.g.
                {'train': model.epochTrackers['train'], 'valid': model.epochTrackers['valid']}
+               figsize:
+               losses:
         :return: (fig, axes) - axes is a dict keyed by metric name, so callers
                  can keep customizing individual subplots afterwards.
         """
@@ -284,7 +166,7 @@ class lossTrackerCollection:
         names = []
         for collection in histories.values():
             for name in collection.trackers:
-                if name not in names:
+                if name not in names and (losses is None or name in losses):
                     names.append(name)
 
         fig, axesList = plt.subplots(len(names), 1, figsize=figsize or (6, 3 * len(names)), squeeze=False)
@@ -301,6 +183,146 @@ class lossTrackerCollection:
         fig.tight_layout()
         return fig, axes
 
+
+class baseTorchModel(torch.nn.Module, abc.ABC):
+    def __init__(self, *args, **kwargs):
+        super(baseTorchModel, self).__init__(*args, **kwargs)
+
+        # todo: do we need per-batch tracking? remove if not required
+        self.trainTrackers = lossTrackerCollection()  # per batch
+        self.epochTrackers = {'train': lossTrackerCollection(),
+                              'valid': lossTrackerCollection()}  # per epoch
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    @property
+    def metrics(self):
+        return self.trainTrackers.metrics
+
+    @abc.abstractmethod
+    def computeLoss(self, data) -> dict:
+        """
+        Compute the losses for a single batch of data.
+        :param data: a batch as produced by the DataLoader
+        :return: dict of named scalar-tensor losses. Must include a
+                 'totalLoss' key - the value backpropagated during
+                 training and monitored for checkpointing / early stopping.
+        """
+        pass
+
+    def trainStep(self, data, optimizer, gradientClippingNorm=None):
+        losses = self.computeLoss(data)
+
+        optimizer.zero_grad()
+        losses['totalLoss'].backward()
+        if gradientClippingNorm is not None:
+            torch.nn.utils.clip_grad_norm_(self.parameters(), gradientClippingNorm)
+        optimizer.step()
+
+        return self.trainTrackers.update({name: loss.detach() for name, loss in losses.items()})
+
+    @torch.no_grad()
+    def validStep(self, data):
+        return self.computeLoss(data)
+
+    def trainLoop(self,
+                  trainDataLoader: torch.utils.data.DataLoader,
+                  optimizer: torch.optim.Optimizer,
+                  epochs: int, reportIters: int = 100, verbose=False,
+                  validDataLoader: Optional[torch.utils.data.DataLoader] = None,
+                  checkpointPath: Optional[str] = None, checkPointName: Optional[str] = None,
+                  scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+                  earlyStopper: Optional[earlyStopping] = None,
+                  annealers: Optional[paramAnnealer] = None,
+                  gradientClippingNorm: Optional[float] = None):
+
+        if earlyStopper is not None and validDataLoader is None:
+            raise ValueError("earlyStopping requires a validDataLoader to monitor")
+
+        annealers = annealers or []
+        trainSize = len(trainDataLoader.dataset)
+
+        self.trainTrackers.clear()
+        self.epochTrackers['train'].clear()
+        self.epochTrackers['valid'].clear()
+
+        pbar = range(epochs) if verbose else tqdm(range(epochs))
+        for t in pbar:
+            if verbose:
+                print(f"Epoch {t + 1}\n-------------------------------")
+            else:
+                # pbar.set_postfix({'epoch': t+1})
+                pass
+
+            for annealer in annealers:
+                current = annealer.step(t, self)
+                if verbose:
+                    print(f"{annealer.param}: {current:>5f}")
+
+            # Set the model to training mode - do here
+            # in case theres a validation dataset
+            self.train()
+
+            trainTotals, nTrainBatches = {}, 0
+            pbarDataLoader = trainDataLoader if verbose else tqdm(trainDataLoader, leave=False)
+            for batch, data in enumerate(pbarDataLoader):
+                metrics = self.trainStep(data, optimizer, gradientClippingNorm)
+                for name, value in metrics.items():
+                    trainTotals[name] = trainTotals.get(name, 0.0) + value.item()
+                nTrainBatches += 1
+
+                if verbose:
+                    if (batch + 1) % reportIters == 0:
+                        print(' '.join([f'{metric}: {metrics[metric]:0.5f}' for metric in metrics]) +
+                              f'[{(batch + 1) * trainDataLoader.batch_size:>5d}/{trainSize:>5d}]')
+                else:
+                    if (batch + 1) % reportIters == 0:
+                        pbarDataLoader.set_postfix({metric: f'{metrics[metric]:>0.3f}' for metric in metrics})
+
+            self.epochTrackers['train'].update({name: total / nTrainBatches for name, total in trainTotals.items()})
+
+            validationLoss = None
+            if validDataLoader:
+                self.eval()
+
+                totals, nBatches = {}, 0
+                for data in validDataLoader:
+                    losses = self.validStep(data)
+                    for name, loss in losses.items():
+                        totals[name] = totals.get(name, 0.0) + loss.item()
+                    nBatches += 1
+
+                validMetrics = {name: total / nBatches for name, total in totals.items()}
+                validationLoss = validMetrics['totalLoss']
+                self.epochTrackers['valid'].update(validMetrics)
+
+                if verbose:
+                    print(f"Validation Error: {validationLoss:>7f}")
+                else:
+                    pbar.set_postfix({"validation loss": f'{validationLoss:>7f}'})
+
+            if checkpointPath:
+                assert(checkPointName is not None)
+                modelDict = {'epoch': t, 'model_state_dict': self.state_dict(),
+                             'optimizer_state_dict': optimizer.state_dict()}
+                if validationLoss is not None:
+                    modelDict['validation_loss'] = validationLoss
+                torch.save(modelDict, checkpointPath + f'{checkPointName}-{t}.model')
+
+            if scheduler:
+                scheduler.step()
+
+            stillAnnealing = any(not annealer.isDone(t) for annealer in annealers)
+            if earlyStopper is not None and not stillAnnealing:
+                if earlyStopper.step(validationLoss, t, self):
+                    print(f"Early stopping: no improvement in {earlyStopper.patience} epochs "
+                          f"(best={earlyStopper.best:>7f} @ epoch {earlyStopper.bestEpoch + 1})")
+                    break
+
+        if earlyStopper is not None:
+            earlyStopper.restore(self)
 
 class reshape(torch.nn.Module):
     def __init__(self, shape):

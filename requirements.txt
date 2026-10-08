@@ -5,3 +5,4 @@ torchvision~=0.20.1
 
 matplotlib~=3.5.3
 pandas~=2.2.2
+tqdm~=4.66

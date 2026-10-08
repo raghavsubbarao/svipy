@@ -693,11 +693,11 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
 
         h = z
         i = 0
-        for stageIdx, (down, downsample) in enumerate(zip(self.downs, self.downsamples)):
+        for j, (down, downsample) in enumerate(zip(self.downs, self.downsamples)):
             h = self.activation(embedding.combine(i, h, down, t_embed))
             i = i + 1
             if self.residuals:
-                h = h + self.activation(embedding.combine(i, h, self.residuals[stageIdx], t_embed))
+                h = h + self.activation(embedding.combine(i, h, self.residuals[j], t_embed))
                 i = i + 1
             skips.append(h)
             h = downsample(h)

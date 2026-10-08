@@ -87,11 +87,7 @@ class multiHeadAttention(torch.nn.Module):
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
-        # contextLength only sizes the causal mask buffer below - a non-causal
-        # block attends over however many tokens forward() actually receives,
-        # with no fixed max, so it has nothing to do with contextLength at all.
-        assert (not is_causal) or (contextLength is not None), \
-            "contextLength is required when is_causal=True"
+        assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
         self.n_out = n_out
@@ -145,8 +141,7 @@ class multiHeadAttentionTorch(torch.nn.Module):
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
-        assert (not is_causal) or (contextLength is not None), \
-            "contextLength is required when is_causal=True"
+        assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
         self.n_out = n_out
@@ -188,8 +183,7 @@ class multiHeadAttentionTorchSDP(torch.nn.Module):
         # is_causal builds its causal mask from the real runtime sequence length, not a
         # pre-sized buffer, so unlike the other two classes there's no mask to size here
         # even in the causal case. Kept only for constructor-signature symmetry with them.
-        assert (not is_causal) or (contextLength is not None), \
-            "contextLength is required when is_causal=True"
+        assert (not is_causal) or (contextLength is not None), "contextLength required for causal attention"
 
         self.n_in = n_in
         self.n_out = n_out

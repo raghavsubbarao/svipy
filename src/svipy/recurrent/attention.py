@@ -1,12 +1,13 @@
 import abc
 import torch
+from typing import Optional
 
 class singleSelfAttention(torch.nn.Module):
     """
     Simple single head self-attention class
     """
 
-    def __init__(self, n_in, n_out, drop_out=0., bias=False):
+    def __init__(self, n_in: int, n_out: int, drop_out: float = 0., bias: bool = False):
         super(singleSelfAttention, self).__init__()
 
         self.n_in = n_in
@@ -38,10 +39,8 @@ class singleCausalAttention(torch.nn.Module):
     """
     Simple single head self-attention class with causal mask
     """
-    # TODO: Create masked self attention class with any possible mask.
-    #       Derive this as a special case with a specific causal mask.
 
-    def __init__(self, n_in, n_out, contextLength, drop_out=0., bias=False):
+    def __init__(self, n_in: int, n_out: int, contextLength: int, drop_out: float = 0., bias: bool = False):
         super(singleCausalAttention, self).__init__()
 
         self.n_in = n_in
@@ -56,7 +55,7 @@ class singleCausalAttention(torch.nn.Module):
             self.dropout = None
 
         self.contextLength = contextLength
-        self.register_buffer('mask', torch.triu(torch.ones(contextLength, contextLength), diagonal=1))
+        self.register_buffer('mask', torch.triu(torch.ones(contextLength, contextLength), diagonal=1).bool())
 
     def forward(self, y):
         # y -> b X t X n_in
@@ -71,7 +70,7 @@ class singleCausalAttention(torch.nn.Module):
         wts = que @ key.transpose(-2, -1)  # b X t X t
 
         # set masked values to -infinity so softmax sets to 0 for causality
-        wts.masked_fill_(self.mask.bool()[:nTokens, :nTokens], -torch.inf)
+        wts.masked_fill_(self.mask[:nTokens, :nTokens], -torch.inf)
 
         att = torch.softmax(wts / self.n_out ** 0.5, dim=-1)  # softmax across keys
         if self.dropout:
@@ -82,7 +81,8 @@ class singleCausalAttention(torch.nn.Module):
 
 class multiHeadAttention(torch.nn.Module):
 
-    def __init__(self, n_in, n_out, nHeads, contextLength, drop_out=0., bias=False, is_causal=True):
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: int, drop_out: float = 0.,
+                 bias: bool = False, is_causal: bool = True):
         super(multiHeadAttention, self).__init__()
 
         # output dimension must be a multiple of n_heads
@@ -92,6 +92,8 @@ class multiHeadAttention(torch.nn.Module):
         self.n_out = n_out
         self.nHeads = nHeads
         self.dHead = n_out // nHeads
+        self.contextLength = contextLength
+        self.is_causal = is_causal
 
         self.Wqkv = torch.nn.Linear(n_in, 3 * n_out, bias=bias)
         self.ff = torch.nn.Linear(n_out, n_out)  # linear layer to combine outputs
@@ -101,10 +103,8 @@ class multiHeadAttention(torch.nn.Module):
         else:
             self.dropout = None
 
-        self.is_causal = is_causal
-        self.contextLength = contextLength
         if is_causal:
-            self.register_buffer("mask", torch.triu(torch.ones(contextLength, contextLength), diagonal=1))
+            self.register_buffer("mask", torch.triu(torch.ones(contextLength, contextLength), diagonal=1).bool())
 
     def forward(self, y):
         b, nTokens, _ = y.shape
@@ -119,7 +119,7 @@ class multiHeadAttention(torch.nn.Module):
 
         # Use the mask to fill attention scores
         if self.is_causal:
-            wts.masked_fill_(self.mask.bool()[:nTokens, :nTokens], -torch.inf)
+            wts.masked_fill_(self.mask[:nTokens, :nTokens], -torch.inf)
 
         att = torch.softmax(wts / self.dHead ** 0.5, dim=-1)  # softmax across keys
         if self.dropout:
@@ -134,51 +134,59 @@ class multiHeadAttention(torch.nn.Module):
 
 class multiHeadAttentionTorch(torch.nn.Module):
 
-    def __init__(self, n_in, n_out, nHeads, contextLength, drop_out=0., bias=False, needWts=True):
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: int, drop_out: float = 0.,
+                 bias: bool = False, is_causal: bool = True, needWts: bool = True):
         super(multiHeadAttentionTorch, self).__init__()
 
         # output dimension must be a multiple of n_heads
         assert (n_out % nHeads == 0)
 
         self.n_in = n_in
+        self.n_out = n_out
+        self.nHeads = nHeads
+        self.dHead = n_out // nHeads
+        self.contextLength = contextLength
+        self.is_causal = is_causal
+        self.needWeights = needWts
 
         self.mha = torch.nn.MultiheadAttention(embed_dim=n_out, num_heads=nHeads, dropout=drop_out,
                                                bias=bias, add_bias_kv=bias, batch_first=True)
-        self.needWeights = needWts
-        self.contextLength = contextLength
+
         self.ff = torch.nn.Linear(n_out, n_out)  # linear layer to combine outputs
-        self.register_buffer("mask", torch.triu(torch.ones(contextLength, contextLength), diagonal=1))
+        if is_causal:
+            self.register_buffer("mask", torch.triu(torch.ones(contextLength, contextLength), diagonal=1).bool())
 
     def forward(self, y):
         b, nTokens, _ = y.shape
 
-        if self.contextLength > nTokens:
+        if self.is_causal:
+            assert self.contextLength >= nTokens
             mask = self.mask[:nTokens, :nTokens]
+            context, _ = self.mha(y, y, y, attn_mask=mask, need_weights=self.needWeights)
         else:
-            mask = self.mask
+            context, _ = self.mha(y, y, y, need_weights=self.needWeights)
 
-        context, _ = self.mha(y, y, y, attn_mask=mask, need_weights=self.needWeights)
         return self.ff(context)  # optional projection
 
 
 class multiHeadAttentionTorchSDP(torch.nn.Module):
 
-    def __init__(self, nin, nout, nHeads, contextLength, dropout=0., bias=False):
+    def __init__(self, n_in: int, n_out: int, nHeads: int, contextLength: int, dropout: float = 0., bias: bool = False, is_causal: bool = True):
         super(multiHeadAttentionTorchSDP, self).__init__()
 
         # output dimension must be a multiple of n_heads
-        assert (nout % nHeads == 0)
+        assert (n_out % nHeads == 0)
 
-        self.n_in = nin
-        self.n_out = nout
+        self.n_in = n_in
+        self.n_out = n_out
         self.nHeads = nHeads
-        self.dHead = nout // nHeads
-
-        self.Wqkv = torch.nn.Linear(nin, 3 * nout, bias=bias)
-        self.dropout = dropout
+        self.dHead = n_out // nHeads
         self.contextLength = contextLength
+        self.dropout = dropout
+        self.is_causal = is_causal
 
-        self.ff = torch.nn.Linear(nout, nout)  # linear layer to combine outputs
+        self.Wqkv = torch.nn.Linear(n_in, 3 * n_out, bias=bias)
+        self.ff = torch.nn.Linear(n_out, n_out)  # linear layer to combine outputs
 
     def forward(self, y):
         b, nTokens, _ = y.shape
@@ -192,7 +200,7 @@ class multiHeadAttentionTorchSDP(torch.nn.Module):
 
         context = torch.nn.functional.scaled_dot_product_attention(que, key, val,
                                                                    dropout_p=dropout,
-                                                                   is_causal=True)  # b x nHeads x nTokens x dHead
+                                                                   is_causal=self.is_causal)  # b x nHeads x nTokens x dHead
 
         # Combine heads, where self.d_out = self.num_heads * self.head_dim
         context = context.transpose(1, 2).contiguous().view(b, nTokens, self.n_out)
@@ -214,16 +222,27 @@ if __name__ == "__main__":
 
     embeddings = torch.randn((batch_size, context_len, embed_dim), device=device)
 
-    # mha = multiHeadAttention(embed_dim, embed_dim, n_heads,
-    #                          context_len, dropout, bias, True).to(device)
-    # mha = multiHeadAttention(embed_dim, embed_dim, n_heads,
-    #                          context_len, dropout, bias, False).to(device)
-    # mha = multiHeadAttentionTorch(embed_dim, embed_dim, n_heads,
-    #                               context_len, dropout, bias, False).to(device)
-    # mha = multiHeadAttentionTorch(embed_dim, embed_dim, n_heads,
-    #                               context_len, dropout, bias, True).to(device)
+    mha = multiHeadAttention(embed_dim, embed_dim, n_heads,
+                             context_len, dropout, bias, True).to(device)
+    out = mha(embeddings)
+    print(out.shape)
+
+    mha = multiHeadAttention(embed_dim, embed_dim, n_heads,
+                             context_len, dropout, bias, False).to(device)
+    out = mha(embeddings)
+    print(out.shape)
+
+    mha = multiHeadAttentionTorch(embed_dim, embed_dim, n_heads,
+                                  context_len, dropout, bias, False).to(device)
+    out = mha(embeddings)
+    print(out.shape)
+
+    mha = multiHeadAttentionTorch(embed_dim, embed_dim, n_heads,
+                                  context_len, dropout, bias, True).to(device)
+    out = mha(embeddings)
+    print(out.shape)
+
     mha = multiHeadAttentionTorchSDP(embed_dim, embed_dim, n_heads,
                                      context_len, dropout, bias).to(device)
-
     out = mha(embeddings)
     print(out.shape)

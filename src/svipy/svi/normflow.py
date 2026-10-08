@@ -648,6 +648,7 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
             self.attNorm = torch.nn.LayerNorm(dims[nStages])
         else:
             self.sha = None
+            self.attNorm = None
 
         # up stage j undoes down stage (nStages-1-j): upsamples to dims[nStages-j]
         # (matching the skip from that stage for concatenation), then the fuse conv
@@ -660,6 +661,7 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
                                         for j in range(nStages)])
 
         # built to mirror the construction loops above exactly
+        downWidths = []
         for i in range(nStages):
             downWidths.append(dims[i + 1])
             if addResidual:

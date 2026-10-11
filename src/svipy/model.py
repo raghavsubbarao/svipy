@@ -241,7 +241,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
 
-        if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) \
+                and validDataLoader is None:
             raise ValueError("Reduce on plateau LR scheduler requires a validDataLoader to monitor")
 
         annealers = annealers or []

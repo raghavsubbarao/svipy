@@ -241,6 +241,9 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
 
+        if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            raise ValueError("Reduce on plateau LR scheduler requires a validDataLoader to monitor")
+
         annealers = annealers or []
         trainSize = len(trainDataLoader.dataset)
 
@@ -312,7 +315,10 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                 torch.save(modelDict, checkpointPath + f'{checkPointName}-{t}.model')
 
             if scheduler:
-                scheduler.step()
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(validationLoss)
+                else:
+                    scheduler.step()
 
             stillAnnealing = any(not annealer.isDone(t) for annealer in annealers)
             if earlyStopper is not None and not stillAnnealing:

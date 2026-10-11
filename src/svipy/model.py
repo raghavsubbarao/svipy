@@ -1,4 +1,5 @@
 import abc
+import contextlib
 import copy
 
 import torch
@@ -193,6 +194,13 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         self.epochTrackers = {'train': lossTrackerCollection(),
                               'valid': lossTrackerCollection()}  # per epoch
 
+        # exponential moving average of the parameters - off by default,
+        # see enableEMA(). Tracked as plain tensors (not a state_dict/buffer)
+        # so it's never saved/loaded by state_dict() itself - checkpointing
+        # it explicitly in trainLoop below is a separate, opt-in step.
+        self.emaDecay = None
+        self.emaShadow = None
+
     @property
     def device(self):
         return next(self.parameters()).device
@@ -212,6 +220,57 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         """
         pass
 
+    def enableEMA(self, decay: float):
+        """
+        Starts tracking an exponential moving average of this model's
+        parameters - standard practice in diffusion training (DDPM, ADM,
+        Stable Diffusion all use it): sampling from the EMA weights instead
+        of the raw trained ones smooths over the step-to-step noise in the
+        final checkpoint, which otherwise shows up as some generations
+        being clean and others collapsing for no clear reason.
+
+        Call directly, or pass emaDecay to trainLoop to have it called
+        automatically. Idempotent - calling again only updates the decay
+        rate, it does not reset an average already in progress, so it's
+        safe to call at the top of a resumed trainLoop().
+        :param decay: typical values are 0.999-0.9999 - closer to 1 means
+                      the average moves slower and smooths over more steps.
+        """
+        self.emaDecay = decay
+        if self.emaShadow is None:
+            self.emaShadow = {name: param.detach().clone()
+                              for name, param in self.named_parameters()}
+
+    @torch.no_grad()
+    def _updateEMA(self):
+        for name, param in self.named_parameters():
+            self.emaShadow[name].mul_(self.emaDecay).add_(param.detach(), alpha=1. - self.emaDecay)
+
+    @contextlib.contextmanager
+    def useEMA(self):
+        """
+        Temporarily swaps in the EMA-averaged parameters - e.g. for sampling
+        after training - restoring the trained parameters on exit. No-op if
+        enableEMA() was never called. Mutates parameters in place (rather
+        than swapping in new Parameter objects) so any optimizer state keyed
+        by parameter identity stays valid; only use this between optimizer
+        steps, not from inside one.
+        """
+        if self.emaShadow is None:
+            yield self
+            return
+
+        originals = {name: param.detach().clone() for name, param in self.named_parameters()}
+        with torch.no_grad():
+            for name, param in self.named_parameters():
+                param.copy_(self.emaShadow[name])
+        try:
+            yield self
+        finally:
+            with torch.no_grad():
+                for name, param in self.named_parameters():
+                    param.copy_(originals[name])
+
     def trainStep(self, data, optimizer, gradientClippingNorm=None):
         losses = self.computeLoss(data)
 
@@ -220,6 +279,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         if gradientClippingNorm is not None:
             torch.nn.utils.clip_grad_norm_(self.parameters(), gradientClippingNorm)
         optimizer.step()
+        if self.emaShadow is not None:
+            self._updateEMA()
 
         return self.trainTrackers.update({name: loss.detach() for name, loss in losses.items()})
 
@@ -236,13 +297,17 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                   scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
                   earlyStopper: Optional[earlyStopping] = None,
                   annealers: Optional[paramAnnealer] = None,
-                  gradientClippingNorm: Optional[float] = None):
+                  gradientClippingNorm: Optional[float] = None,
+                  emaDecay: Optional[float] = None):
 
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
 
         if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) and validDataLoader is None:
             raise ValueError("Reduce on plateau LR scheduler requires a validDataLoader to monitor")
+
+        if emaDecay is not None:
+            self.enableEMA(emaDecay)
 
         annealers = annealers or []
         trainSize = len(trainDataLoader.dataset)
@@ -312,6 +377,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                              'optimizer_state_dict': optimizer.state_dict()}
                 if validationLoss is not None:
                     modelDict['validation_loss'] = validationLoss
+                if self.emaShadow is not None:
+                    modelDict['ema_state_dict'] = self.emaShadow
                 torch.save(modelDict, checkpointPath + f'{checkPointName}-{t}.model')
 
             if scheduler:

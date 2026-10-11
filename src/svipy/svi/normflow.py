@@ -654,10 +654,10 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
             # another unnormalized residual stack on top of the conv path -
             # exactly the kind of thing that destabilized training before
             # gradient clipping was added.
-            self.attnNorm = torch.nn.LayerNorm(dims[nStages])
+            self.attNorm = torch.nn.LayerNorm(dims[nStages])
         else:
             self.sha = None
-            self.attnNorm = None
+            self.attNorm = None
 
         # up stage j undoes down stage (nStages-1-j): upsamples to dims[nStages-j]
         # (matching the skip from that stage for concatenation), then the fuse conv
@@ -700,7 +700,7 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
         if self.sha:
             dims = h.shape
             tokens = h.flatten(2).transpose(1, 2)
-            tokens = tokens + self.sha(self.attnNorm(tokens))
+            tokens = tokens + self.sha(self.attNorm(tokens))
             h = tokens.transpose(1, 2).reshape(dims)
         i = i + 1
 

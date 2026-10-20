@@ -685,34 +685,118 @@ class scalarConditionedNetworkUNet(scalarConditionedNetwork):
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
         skips = []
 
-        h = z
+        x = z
         i = 0
         for j, (down, downsample) in enumerate(zip(self.downs, self.downsamples)):
-            h = self.activation(embedding.combine(i, h, down, t_embed))
+            x = self.activation(embedding.combine(i, x, down, t_embed))
             i = i + 1
             if self.residuals:
-                h = h + self.activation(embedding.combine(i, h, self.residuals[j], t_embed))
+                x = x + self.activation(embedding.combine(i, x, self.residuals[j], t_embed))
                 i = i + 1
-            skips.append(h)
-            h = downsample(h)
+            skips.append(x)
+            x = downsample(x)
 
-        h = self.activation(embedding.combine(i, h, self.bottleneck, t_embed))
+        x = self.activation(embedding.combine(i, x, self.bottleneck, t_embed))
         if self.sha:
-            dims = h.shape
-            tokens = h.flatten(2).transpose(1, 2)
+            dims = x.shape
+            tokens = x.flatten(2).transpose(1, 2)
             tokens = tokens + self.sha(self.attNorm(tokens))
-            h = tokens.transpose(1, 2).reshape(dims)
+            x = tokens.transpose(1, 2).reshape(dims)
         i = i + 1
 
         for j, (upsample, up) in enumerate(zip(self.upsamples, self.ups)):
-            h = upsample(h)
-            h = torch.cat([h, skips.pop()], dim=1)
-            h = embedding.combine(i, h, up, t_embed)
+            x = upsample(x)
+            x = torch.cat([x, skips.pop()], dim=1)
+            x = embedding.combine(i, x, up, t_embed)
             if j < len(self.ups) - 1:  # no activation on the final output layer, matching
-                h = self.activation(h)  # scalarConditionedNetworkCNN's own convention
+                x = self.activation(x)  # scalarConditionedNetworkCNN's own convention
             i = i + 1
 
-        return h
+        return x
+
+# class UNetResidualBlock(torch.nn.Module):
+#     def __init__(self, c_in: int, c_out: int, c_norm=32, activation: Optional[torch.nn.Module] = None):
+#         super(UNetResidualBlock, self).__init__()
+#         self.c_norm = c_norm
+#         self.norm1 = torch.nn.GroupNorm(c_norm, c_in)
+#         self.conv1 = torch.nn.Conv2d(c_in, c_out, 3, padding=1)
+#         self.norm2 = torch.nn.GroupNorm(c_norm, c_out)
+#         self.conv2 = torch.nn.Conv2d(c_out, c_out, 3, padding=1)
+#         self.skip = torch.nn.Conv2d(c_in, c_out, 1) if c_in != c_out else None
+#         self.activation = activation if activation is not None else torch.nn.functional.silu()
+#
+#         torch.nn.init.zeros_(self.conv2.weight)
+#         torch.nn.init.zeros_(self.conv2.bias)
+#
+#     def forward(self, x: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding, i: int):
+#         x = self.activation(self.norm1(x))
+#         x = embedding.combine(i, x, self.conv1, t_embed)
+#         x = self.skip(x) + self.conv2(self.norm2(x))
+#         return x
+#
+#
+# class scalarConditionedNetworkUNetResidual(scalarConditionedNetwork):
+#     """
+#     A small U-Net: len(channels) downsampling stages (each a same-padding
+#     conv then a stride-2 conv to halve resolution), a bottleneck, then
+#     len(channels) upsampling stages (each a stride-2 transpose conv then a
+#     same-padding conv) that concatenate the matching downsampling stage's
+#     pre-downsample activation as a skip connection. The last upsampling
+#     stage maps back to inDims, undoing the first downsampling stage exactly,
+#     so there's no separate final projection layer.
+#
+#     Meant to pair with filmTimeEmbedding (t_dim=0) - FiLM is applied to
+#     every conv's output (every down stage, the bottleneck, every up stage),
+#     matching how real diffusion U-Nets inject time at every resolution.
+#
+#     Input spatial size must be divisible by 2**len(channels) (each down
+#     stage halves it; the up path needs to land back on an integer size).
+#     """
+#     def __init__(self, inDims: int, channels: List[int], kernelSize: int = 3,
+#                  t_dim: int = 1, activation: Optional[torch.nn.Module] = None):
+#         super(scalarConditionedNetworkUNetResidual, self).__init__()
+#         self.activation = activation if activation is not None else torch.nn.ELU()
+#
+#         dims = [inDims + t_dim] + list(channels)
+#         nStages = len(channels)
+#
+#         self.downs = torch.nn.ModuleList([UNetResidualBlock(dims[i], dims[i + 1], c_norm=8, activation=self.activation)
+#                                           for i in range(nStages)])
+#
+#         self.bottleneck = nn.ModuleList([UNetResidualBlock(dims[-1], dims[-1], c_norm=8, activation=self.activation),
+#                                          # SelfAttn(c),
+#                                          UNetResidualBlock(dims[-1], dims[-1], c_norm=8, activation=self.activation)])
+#
+#         self.ups = torch.nn.ModuleList([UNetResidualBlock(dims[nStages - j], dims[nStages - j], c_norm=8, activation=self.activation)
+#                                         for j in range(nStages)])
+#
+#         # built to mirror the construction loops above exactly
+#         downWidths = [dims[j] for j in range(nStages)]
+#         bottleneckWidth = [dims[-1]]
+#         upWidths = [dims[nStages - 1 - j] for j in range(nStages)]
+#         self.__filmDims = downWidths + bottleneckWidth + upWidths
+#
+#     def filmDims(self) -> List[int]:
+#         return self.__filmDims
+#
+#     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
+#         skips = []
+#
+#         x = z
+#         for j, down in enumerate(self.downs):
+#             x = down(x, t_embed, embedding, j)
+#
+#         x = self.activation(embedding.combine(i, x, self.bottleneck, t_embed))
+#
+#         for j, (upsample, up) in enumerate(zip(self.upsamples, self.ups)):
+#             x = upsample(x)
+#             x = torch.cat([x, skips.pop()], dim=1)
+#             x = embedding.combine(i, x, up, t_embed)
+#             if j < len(self.ups) - 1:  # no activation on the final output layer, matching
+#                 x = self.activation(x)  # scalarConditionedNetworkCNN's own convention
+#             i = i + 1
+#
+#         return x
 
 
 # probes for hutchinson estimator

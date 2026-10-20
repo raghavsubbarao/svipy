@@ -286,3 +286,19 @@ class diffusionSampler(torch.nn.Module):
 
     def forward(self, xt: torch.Tensor, s: float, t: float, lamda: float, nSteps: int) -> torch.Tensor:
         return self.interpolate(xt, s, t, lamda, nSteps)
+
+
+if __name__ == "__main__":
+    from svipy.svi.normflow import scalarConditionedNetworkUNet, filmTimeEmbedding
+    tcn = scalarConditionedNetworkUNet(3, [32, 64, 128, 256], t_dim=0,
+                                       addResidual=True, addAttention=True)
+    embed = filmTimeEmbedding(tcn.filmDims())
+    tcf = timeConditionedField(tcn, embed)
+
+    path = varPreservingConditionalPathDDPMCosine(target='score')
+
+    model_diff_ddpm = conditionalScoreMatcher(path, tcf)
+
+    B = 32
+    input = torch.rand((B, 3, 64, 64))
+    model_diff_ddpm.computeLoss(input)

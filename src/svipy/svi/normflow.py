@@ -721,10 +721,13 @@ class UNetResidualBlock(torch.nn.Module):
         torch.nn.init.zeros_(self.conv2.bias)
 
     def forward(self, x: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding, i: int):
-        x = self.conv1(self.activation(self.norm1(x)))
-        x = embedding.combine(i, x, self.norm2, t_embed)
-        x = self.skip(x) + self.conv2(self.activation(x))
-        return x
+        z = self.conv1(self.activation(self.norm1(x)))
+        z = embedding.combine(i, z, self.norm2, t_embed)
+        if self.skip:
+            z = self.skip(x) + self.conv2(self.activation(z))
+        else:
+            z = x + self.conv2(self.activation(z))
+        return z
 
 class convolutionalAttention(torch.nn.Module):
     def __init__(self, c_in: int, c_out: int, nHeads: int):
@@ -759,9 +762,10 @@ class scalarConditionedNetworkUNetResidual(scalarConditionedNetwork):
                  t_dim: int = 1, activation: Optional[torch.nn.Module] = None):
         super(scalarConditionedNetworkUNetResidual, self).__init__()
         self.activation = activation if activation is not None else torch.nn.ELU()
+        dims = list(channels)
+        nStages = len(channels) - 1
 
-        dims = [inDims + t_dim] + list(channels)
-        nStages = len(channels)
+        self.embed = torch.nn.Conv2d(inDims + t_dim, channels[0], 3, padding=1)
 
         # encoder
         self.downs = torch.nn.ModuleList([UNetResidualBlock(dims[i], dims[i + 1], kernelSize=kernelSize,
@@ -772,11 +776,11 @@ class scalarConditionedNetworkUNetResidual(scalarConditionedNetwork):
                                                 for i in range(nStages)])
 
         # bottleneck
-        self.bottleneck = nn.ModuleList([UNetResidualBlock(dims[-1], dims[-1], kernelSize=kernelSize,
-                                                           c_norm=8, activation=self.activation),
-                                         convolutionalAttention(dims[-1], dims[-1], 4),
-                                         UNetResidualBlock(dims[-1], dims[-1], kernelSize=kernelSize,
-                                                           c_norm=8, activation=self.activation)])
+        self.bottleneck = torch.nn.ModuleList([UNetResidualBlock(dims[-1], dims[-1], kernelSize=kernelSize,
+                                                                 c_norm=8, activation=self.activation),
+                                               convolutionalAttention(dims[-1], dims[-1], 4),
+                                               UNetResidualBlock(dims[-1], dims[-1], kernelSize=kernelSize,
+                                                                 c_norm=8, activation=self.activation)])
 
         # up stage j undoes down stage (nStages-1-j): upsamples to dims[nStages-j]
         # (matching the skip from that stage for concatenation), then the fuse conv
@@ -784,14 +788,14 @@ class scalarConditionedNetworkUNetResidual(scalarConditionedNetwork):
         self.upsamples = torch.nn.ModuleList([torch.nn.ConvTranspose2d(dims[i] * 2, dims[i], kernel_size=4,
                                                                        stride=2, padding=1)
                                               for i in range(nStages, 0, -1)])
-        self.ups = torch.nn.ModuleList([UNetResidualBlock(dims[j] * 2, dims[j - 1], kernelSize=kernelSize,
+        self.ups = torch.nn.ModuleList([UNetResidualBlock(dims[i] * 2, dims[i - 1], kernelSize=kernelSize,
                                                           c_norm=8, activation=self.activation)
-                                        for j in range(nStages, 0, -1)])
+                                        for i in range(nStages, 0, -1)])
 
         # built to mirror the construction loops above exactly
-        downWidths = [dims[j] for j in range(nStages)]
-        bottleneckWidth = [dims[-1], 0, dims[-1]]
-        upWidths = [dims[nStages - 1 - j] for j in range(nStages)]
+        downWidths = [dims[j + 1] for j in range(nStages)]
+        bottleneckWidth = [dims[-1], dims[-1]]
+        upWidths = [dims[j] for j in range(nStages - 1, -1, -1)]
         self.__filmDims = downWidths + bottleneckWidth + upWidths
 
     def filmDims(self) -> List[int]:
@@ -800,7 +804,8 @@ class scalarConditionedNetworkUNetResidual(scalarConditionedNetwork):
     def forward(self, z: torch.Tensor, t_embed: torch.Tensor, embedding: timeEmbedding) -> torch.Tensor:
         skips = []
 
-        x = z
+        x = self.embed(z)
+        skips.append(x)
         i = 0
         for j, (down, downsample) in enumerate(zip(self.downs, self.downsamples)):
             x = down(x, t_embed, embedding, i)
@@ -823,11 +828,10 @@ class scalarConditionedNetworkUNetResidual(scalarConditionedNetwork):
 
         for j, (upsample, up) in enumerate(zip(self.upsamples, self.ups)):
             x = upsample(torch.cat([x, skips.pop()], dim=1))
-            x = up.combine(torch.cat([x, skips.pop()], dim=1), t_embed, embedding, i)
+            x = up(torch.cat([x, skips.pop()], dim=1), t_embed, embedding, i)
             i = i + 1
             if j < len(self.ups) - 1:  # no activation on the final output layer, matching
                 x = self.activation(x)  # scalarConditionedNetworkCNN's own convention
-            i = i + 1
 
         return x
 

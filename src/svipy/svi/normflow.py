@@ -515,9 +515,15 @@ class filmTimeEmbedding(timeEmbedding):
         t = t.reshape(-1, 1)  # (B, 1) or (1, 1) for a scalar/shared t
         angles = t * self.frequencies  # (B, dim//2)
         tx = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)  # (B, dim)
+        # each layer must consume the PREVIOUS layer's output, not the raw
+        # Fourier features every time - chain through h rather than re-reading
+        # tx. When self.net is empty (hiddenDims=None) h is just tx unchanged,
+        # so self.out(h) below correctly falls back to a single Linear straight
+        # off the Fourier features.
+        h = tx
         for layer in self.net:
-            params = self.activation(layer(tx))  # (leadingDim, 2 * sum(dims))
-        params = self.out(params)  # no activation on final step
+            h = self.activation(layer(h))
+        params = self.out(h)  # no activation on final step
         chunks = params.split([2 * d for d in self.dims], dim=-1)
         gammas = [c[..., :d] for c, d in zip(chunks, self.dims)]
         betas = [c[..., d:] for c, d in zip(chunks, self.dims)]

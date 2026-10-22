@@ -514,10 +514,10 @@ class filmTimeEmbedding(timeEmbedding):
     def forward(self, t: torch.Tensor) -> List[Tuple[torch.Tensor, torch.Tensor]]:
         t = t.reshape(-1, 1)  # (B, 1) or (1, 1) for a scalar/shared t
         angles = t * self.frequencies  # (B, dim//2)
-        tx = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)  # (B, dim)
+        h = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)  # (B, dim)
         for layer in self.net:
-            params = self.activation(layer(tx))  # (leadingDim, 2 * sum(dims))
-        params = self.out(params)  # no activation on final step
+            h = self.activation(layer(h))  # (leadingDim, 2 * sum(dims))
+        params = self.out(h)  # no activation on final step
         chunks = params.split([2 * d for d in self.dims], dim=-1)
         gammas = [c[..., :d] for c, d in zip(chunks, self.dims)]
         betas = [c[..., d:] for c, d in zip(chunks, self.dims)]
@@ -772,6 +772,9 @@ class convolutionalAttention(torch.nn.Module):
         super(convolutionalAttention, self).__init__()
         self.norm = torch.nn.GroupNorm(num_groups=8, num_channels=c_in)
         self.mha = multiHeadAttentionTorchSDP(c_in, c_out, nHeads, bias=True, is_causal=False)
+
+        torch.nn.init.zeros_(self.mha.ff.weight)
+        torch.nn.init.zeros_(self.mha.ff.bias)
 
     def forward(self, x: torch.Tensor):
         # x is of shape B x C x H X W so reshape to apply attention

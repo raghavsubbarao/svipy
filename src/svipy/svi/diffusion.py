@@ -218,7 +218,7 @@ class varPreservingConditionalPathLinear(varPreservingConditionalPath):
 
 
 class conditionalScoreMatcher(baseTorchModel):
-    def __init__(self, pathGenerator: conditionalPath, scoreField: timeConditionedField):
+    def __init__(self, pathGenerator: conditionalPath, scoreField: timeConditionedField, sampling='uniform'):
         super(conditionalScoreMatcher, self).__init__()
         self.pathGenerator = pathGenerator
         self.scoreField = scoreField
@@ -226,12 +226,21 @@ class conditionalScoreMatcher(baseTorchModel):
     def computeLoss(self, data) -> dict:
         Xd = data.to(self.device)
         Xn = torch.randn_like(Xd, device=self.device)
-        t = torch.rand(Xd.shape[0], device=self.device)
+
+        if sampling == 'uniform':
+            t = torch.rand(Xd.shape[0], device=self.device)
+            q_t = torch.ones_like(t)
+        else:
+            # oversample near t=1 via a Beta-like skew; q(t) is this density
+            u = torch.rand(Xd.shape[0], device=self.device)
+            t = 1 - (1 - u) ** 2  # skews samples toward 1; q(t) = 2(1-t)
+            q_t = 2 * (1 - t) + 1e-4  # avoid div-by-zero right at t=1
 
         Xt, Ut = self.pathGenerator(Xn, Xd, t)
         Vt = self.scoreField(Xt, t)
 
-        totalLoss = torch.mean(torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1))
+        perExample = torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1)
+        totalLoss = torch.mean(perExample / q_t)
 
         return {"totalLoss": totalLoss}
 

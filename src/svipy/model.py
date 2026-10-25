@@ -298,7 +298,8 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
                   earlyStopper: Optional[earlyStopping] = None,
                   annealers: Optional[paramAnnealer] = None,
                   gradientClippingNorm: Optional[float] = None,
-                  emaDecay: Optional[float] = None):
+                  emaDecay: Optional[float] = None,
+                  startEpoch: int = 0):
 
         if earlyStopper is not None and validDataLoader is None:
             raise ValueError("earlyStopping requires a validDataLoader to monitor")
@@ -316,7 +317,7 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         self.epochTrackers['train'].clear()
         self.epochTrackers['valid'].clear()
 
-        pbar = range(epochs) if verbose else tqdm(range(epochs))
+        pbar = range(startEpoch, epochs) if verbose else tqdm(range(epochs))
         for t in pbar:
             if verbose:
                 print(f"Epoch {t + 1}\n-------------------------------")
@@ -374,7 +375,9 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
             if checkpointPath:
                 assert(checkPointName is not None)
                 modelDict = {'epoch': t, 'model_state_dict': self.state_dict(),
-                             'optimizer_state_dict': optimizer.state_dict()}
+                             'optimizer_state_dict': optimizer.state_dict(),
+                             'train_trackers': self.trainTrackers,
+                             'epoch_trackers': self.epochTrackers}
                 if validationLoss is not None:
                     modelDict['validation_loss'] = validationLoss
                 if self.emaShadow is not None:

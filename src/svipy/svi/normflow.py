@@ -959,9 +959,9 @@ class continuousNormFlow(normFlowModule):
         self.odeMethod = odeMethod
         self.odeOptions = odeOptions
 
-        # kinetic energy of the last integration, ∫||f(z,t)||^2 dt per example -
-        # a diagnostic/regularization quantity (Finlay et al. 2020), refreshed
-        # on every _integrate() call that tracks it. Kept as a side-channel
+        # kinetic energy of the last integration, ∫||f(z,t)||^2 dt per example
+        # - a diagnostic/regularization quantity (Finlay et al. 2020), updated
+        # on every _integrate() call that tracks it. Kept as a side-channel``
         # attribute rather than a return value so this class still satisfies
         # normFlowModule's shared (transformed, logDet) signature like every
         # other flow type; anyone holding a continuousNormFlow instance -

@@ -534,8 +534,7 @@ class adaGnTimeEmbedding(filmTimeEmbedding):
     def __init__(self, nFrequencies: int, outDims: List[int],
                  hiddenDims: Optional[List[int]] = None,
                  activation: Optional[torch.nn.Module] = None):
-        super().__init__(adaGnTimeEmbedding, self).__init__(nFrequencies, outDims,
-                                                            hiddenDims, activation)
+        super().__init__(nFrequencies, outDims, hiddenDims, activation)
 
     def combine(self, i, x, layer, t_embed):
         gamma, beta = t_embed[i]  # each (leadingDim, d_i)

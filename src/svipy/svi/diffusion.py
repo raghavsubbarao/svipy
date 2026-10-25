@@ -218,16 +218,20 @@ class varPreservingConditionalPathLinear(varPreservingConditionalPath):
 
 
 class conditionalScoreMatcher(baseTorchModel):
-    def __init__(self, pathGenerator: conditionalPath, scoreField: timeConditionedField, sampling='uniform'):
+    def __init__(self, pathGenerator: conditionalPath,
+                 scoreField: timeConditionedField,
+                 sampling='uniform', reweight=True):
         super(conditionalScoreMatcher, self).__init__()
         self.pathGenerator = pathGenerator
         self.scoreField = scoreField
+        self.sampling = sampling
+        self.reweight = reweight
 
     def computeLoss(self, data) -> dict:
         Xd = data.to(self.device)
         Xn = torch.randn_like(Xd, device=self.device)
 
-        if sampling == 'uniform':
+        if self.sampling == 'uniform':
             t = torch.rand(Xd.shape[0], device=self.device)
             q_t = torch.ones_like(t)
         else:
@@ -239,8 +243,16 @@ class conditionalScoreMatcher(baseTorchModel):
         Xt, Ut = self.pathGenerator(Xn, Xd, t)
         Vt = self.scoreField(Xt, t)
 
+        if self.reweight:
+            alpha = self.pathGenerator.alpha(t)
+            snr = (alpha ** 2) / (1 - alpha ** 2).clamp(min=1e-8)
+            gamma = 5.0  # Hang et al.'s recommended default
+            weight = torch.clamp(snr, max=gamma) / snr.clamp(min=1e-8)
+        else:
+            weight = torch.ones_like(t)
+
         perExample = torch.sum(torch.square(Vt - Ut).flatten(start_dim=1), dim=1)
-        totalLoss = torch.mean(perExample / q_t)
+        totalLoss = torch.mean(weight * perExample / q_t)
 
         return {"totalLoss": totalLoss}
 

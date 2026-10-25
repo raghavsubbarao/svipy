@@ -313,11 +313,12 @@ class baseTorchModel(torch.nn.Module, abc.ABC):
         annealers = annealers or []
         trainSize = len(trainDataLoader.dataset)
 
-        self.trainTrackers.clear()
-        self.epochTrackers['train'].clear()
-        self.epochTrackers['valid'].clear()
+        if startEpoch == 0:
+            self.trainTrackers.clear()
+            self.epochTrackers['train'].clear()
+            self.epochTrackers['valid'].clear()
 
-        pbar = range(startEpoch, epochs) if verbose else tqdm(range(epochs))
+        pbar = range(startEpoch, epochs) if verbose else tqdm(range(startEpoch, epochs))
         for t in pbar:
             if verbose:
                 print(f"Epoch {t + 1}\n-------------------------------")

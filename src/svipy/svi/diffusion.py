@@ -222,12 +222,13 @@ class conditionalScoreMatcher(baseTorchModel):
         super(conditionalScoreMatcher, self).__init__()
         self.pathGenerator = pathGenerator
         self.scoreField = scoreField
+        self.sampling = sampling
 
     def computeLoss(self, data) -> dict:
         Xd = data.to(self.device)
         Xn = torch.randn_like(Xd, device=self.device)
 
-        if sampling == 'uniform':
+        if self.sampling == 'uniform':
             t = torch.rand(Xd.shape[0], device=self.device)
             q_t = torch.ones_like(t)
         else:

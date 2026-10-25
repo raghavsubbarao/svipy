@@ -528,8 +528,21 @@ class filmTimeEmbedding(timeEmbedding):
         out = layer(x)
         gamma = self._expandToMatch(gamma, out)
         beta = self._expandToMatch(beta, out)
-        return (1 + gamma) * out + beta
+        return gamma * out + beta
 
+class adaGnTimeEmbedding(filmTimeEmbedding):
+    def __init__(self, nFrequencies: int, outDims: List[int],
+                 hiddenDims: Optional[List[int]] = None,
+                 activation: Optional[torch.nn.Module] = None):
+        super().__init__(adaGnTimeEmbedding, self).__init__(nFrequencies, outDims,
+                                                            hiddenDims, activation)
+
+    def combine(self, i, x, layer, t_embed):
+        gamma, beta = t_embed[i]  # each (leadingDim, d_i)
+        out = layer(x)
+        gamma = self._expandToMatch(gamma, out)
+        beta = self._expandToMatch(beta, out)
+        return (1 + gamma) * out + beta
 
 # take input and time to produce flow/velocity fields
 class scalarConditionedNetwork(torch.nn.Module, abc.ABC):

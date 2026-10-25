@@ -225,6 +225,8 @@ class conditionalScoreMatcher(baseTorchModel):
         self.pathGenerator = pathGenerator
         self.scoreField = scoreField
         self.sampling = sampling
+        if reweight:
+            assert isinstance(pathGenerator, varPreservingConditionalPath), 'SNR reweighting requires a VAR preserving conditional path'
         self.reweight = reweight
 
     def computeLoss(self, data) -> dict:

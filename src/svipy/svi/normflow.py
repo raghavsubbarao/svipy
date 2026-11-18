@@ -487,9 +487,9 @@ class filmTimeEmbedding(timeEmbedding):
                  hiddenDims: Optional[List[int]] = None,
                  activation: Optional[torch.nn.Module] = None):
         # dims: the output width of every FiLM-able layer, in order -
-        # i.e. exactly network.filmDims() for whichever network this pairs
-        # with (scalarConditionedNetworkMLP/CNN). One (gamma, beta) pair gets
-        # produced per entry, sized to that entry's width.
+        # i.e. exactly network.filmDims() for whichever network this
+        # pairs with (scalarConditionedNetworkMLP/CNN). One (gamma, beta)
+        # pair gets produced per entry, sized to that entry's width.
         super().__init__()
         assert nFrequencies % 2 == 0
         self.nFrequencies = nFrequencies
@@ -534,8 +534,8 @@ class adaGnTimeEmbedding(filmTimeEmbedding):
     def __init__(self, nFrequencies: int, outDims: List[int],
                  hiddenDims: Optional[List[int]] = None,
                  activation: Optional[torch.nn.Module] = None):
-        super().__init__(adaGnTimeEmbedding, self).__init__(nFrequencies, outDims,
-                                                            hiddenDims, activation)
+        super(adaGnTimeEmbedding, self).__init__(nFrequencies, outDims,
+                                                 hiddenDims, activation)
 
     def combine(self, i, x, layer, t_embed):
         gamma, beta = t_embed[i]  # each (leadingDim, d_i)

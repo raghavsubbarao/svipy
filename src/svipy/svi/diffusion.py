@@ -312,11 +312,11 @@ class diffusionSampler(torch.nn.Module):
 
 
 if __name__ == "__main__":
-    from svipy.svi.normflow import scalarConditionedNetworkUNet, filmTimeEmbedding, scalarConditionedNetworkUNetResidual
+    from svipy.svi.normflow import scalarConditionedNetworkUNet, adaGnTimeEmbedding, scalarConditionedNetworkUNetResidual
     # tcn = scalarConditionedNetworkUNet(3, [32, 64, 128, 256], t_dim=0,
     #                                    addResidual=True, addAttention=True)
     tcn = scalarConditionedNetworkUNetResidual(3, [32, 32, 64, 128, 256], t_dim=0)
-    embed = filmTimeEmbedding(32, tcn.filmDims(), [128])
+    embed = adaGnTimeEmbedding(32, tcn.filmDims(), [128])
     tcf = timeConditionedField(tcn, embed)
 
     path = varPreservingConditionalPathDDPMCosine(target='score')

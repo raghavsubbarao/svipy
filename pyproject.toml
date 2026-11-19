@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "svipy"
+version = "0.1.0"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Raghav Subbarao" }]
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.5.1",
+    "torchvision>=0.20.1",
+    "torchdiffeq>=0.2.5",
+    "numpy>=1.26",
+    "matplotlib>=3.9",
+    "tqdm",
+    "pydantic>=2",
+    "httpx",
+]
+
+[project.optional-dependencies]
+notebooks = ["pandas>=2.2", "ipykernel"]
+
+[project.urls]
+Homepage = "https://github.com/raghavsubbarao/svipy"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# NOTE: torch/torchvision must come from the CUDA 11.8 index, not PyPI:
+#   uv pip install --index-url https://download.pytorch.org/whl/cu118 --extra-index-url https://pypi.org/simple -index-strategy unsafe-best-match -e ".[notebooks]"

@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "svipy"
 version = "0.1.0"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
 authors = [{ name = "Raghav Subbarao" }]
 requires-python = ">=3.12"
 dependencies = [
